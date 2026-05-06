@@ -1,0 +1,11 @@
+{
+  "id": "simple-contact-manager",
+  "name": "Simple Contact Manager",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "A contact management system with a follow-up dashboard, guided contact creation, and interaction logging. Requires the Dataview plugin.",
+  "author": "SilentNinja06",
+  "authorUrl": "https://github.com/SilentNinja06/simple_cm",
+  "fundingUrl": "",
+  "isDesktopOnly": false
+}
