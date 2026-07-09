@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to release (must match manifest.json version, e.g. 2.1.0)"
+        required: true
 
 permissions:
   contents: write
@@ -27,8 +32,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
           gh release create "$tag" \
+            --target "$GITHUB_SHA" \
             --title "$tag" \
             --generate-notes \
             main.js manifest.json styles.css
