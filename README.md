@@ -25,7 +25,15 @@ An Obsidian plugin that turns your vault into a lightweight contact relationship
 2. Search for **Simple Contact Manager**
 3. Click Install, then Enable
 
-### Manual installation (current method)
+### Via BRAT (recommended until listed)
+
+1. Install and enable [Obsidian42 - BRAT](https://github.com/TfTHacker/obsidian42-brat) from Community Plugins
+2. In BRAT settings, choose **Add beta plugin** and enter: `SilentNinja06/simple_cm`
+3. Enable **Simple Contact Manager** in Settings → Community Plugins
+
+BRAT installs the latest GitHub release and keeps the plugin auto-updated as new releases are published.
+
+### Manual installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/SilentNinja06/simple_cm/releases)
 2. Extract the zip — you need three files: `main.js`, `manifest.json`, `styles.css`
@@ -100,6 +108,19 @@ npm run build
 ```
 
 This produces `main.js` in the project root. Copy `main.js`, `manifest.json`, and `styles.css` into your vault's plugin folder.
+
+---
+
+## Releasing (maintainers)
+
+Releases are automated by GitHub Actions. To cut a release:
+
+```bash
+npm version patch   # or minor / major — updates manifest.json and versions.json
+git push && git push --tags
+```
+
+Pushing a tag triggers the release workflow, which builds the plugin and publishes a GitHub release with `main.js`, `manifest.json`, and `styles.css` attached. Tag names must exactly match the `version` in `manifest.json` (no `v` prefix), per Obsidian's plugin guidelines — `npm version` handles this automatically.
 
 ---
 
