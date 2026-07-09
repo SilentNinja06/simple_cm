@@ -30,206 +30,158 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   contactsFolder: "Contacts",
-  templatesFolder: "Templates",
   dashboardPath: "Contact Dashboard.md"
 };
+var PRIORITIES = ["high", "medium", "low"];
+var PRIORITY_LABELS = {
+  high: "High (7\u201314 days)",
+  medium: "Medium (30 days)",
+  low: "Low (60\u201390 days)"
+};
+var RELATIONSHIPS = [
+  "client",
+  "colleague",
+  "friend",
+  "lead",
+  "mentor",
+  "acquaintance",
+  "other"
+];
+var CADENCE_DAYS = [7, 14, 30, 60, 90];
 function today() {
   return (0, import_obsidian.moment)().format("YYYY-MM-DD");
 }
 function addDays(days) {
   return (0, import_obsidian.moment)().add(days, "days").format("YYYY-MM-DD");
 }
+function sanitizeFileName(name) {
+  return name.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim();
+}
 async function ensureFolder(app, folderPath) {
-  const existing = app.vault.getAbstractFileByPath(folderPath);
-  if (!existing) {
+  if (!app.vault.getAbstractFileByPath(folderPath)) {
     await app.vault.createFolder(folderPath);
   }
 }
 var NewContactModal = class extends import_obsidian.Modal {
-  constructor(app, settings, onSubmit) {
+  constructor(app, onSubmit) {
     super(app);
-    this.settings = settings;
+    this.data = {
+      name: "",
+      email: "",
+      phone: "",
+      company: "",
+      priority: "medium",
+      relationship: "acquaintance",
+      followupDays: 30
+    };
     this.onSubmit = onSubmit;
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: "New Contact" });
-    const form = contentEl.createDiv({ cls: "scm-modal-form" });
-    const nameField = form.createDiv({ cls: "scm-field" });
-    nameField.createEl("label", { text: "Full Name *" });
-    const nameInput = nameField.createEl("input", {
-      type: "text",
-      placeholder: "Jane Smith"
+    this.titleEl.setText("New contact");
+    new import_obsidian.Setting(contentEl).setName("Full name").addText((text) => {
+      text.setPlaceholder("Jane Smith").onChange((v) => this.data.name = v);
+      text.inputEl.focus();
     });
-    nameInput.focus();
-    const emailField = form.createDiv({ cls: "scm-field" });
-    emailField.createEl("label", { text: "Email" });
-    const emailInput = emailField.createEl("input", {
-      type: "email",
-      placeholder: "jane@example.com"
+    new import_obsidian.Setting(contentEl).setName("Email").addText(
+      (text) => text.setPlaceholder("jane@example.com").onChange((v) => this.data.email = v.trim())
+    );
+    new import_obsidian.Setting(contentEl).setName("Phone").addText(
+      (text) => text.setPlaceholder("555-1234").onChange((v) => this.data.phone = v.trim())
+    );
+    new import_obsidian.Setting(contentEl).setName("Company").addText(
+      (text) => text.setPlaceholder("Acme Corp").onChange((v) => this.data.company = v.trim())
+    );
+    new import_obsidian.Setting(contentEl).setName("Priority").addDropdown((dd) => {
+      PRIORITIES.forEach((p) => dd.addOption(p, PRIORITY_LABELS[p]));
+      dd.setValue(this.data.priority).onChange(
+        (v) => this.data.priority = v
+      );
     });
-    const phoneField = form.createDiv({ cls: "scm-field" });
-    phoneField.createEl("label", { text: "Phone" });
-    const phoneInput = phoneField.createEl("input", {
-      type: "text",
-      placeholder: "555-1234"
+    new import_obsidian.Setting(contentEl).setName("Relationship").addDropdown((dd) => {
+      RELATIONSHIPS.forEach((r) => dd.addOption(r, r));
+      dd.setValue(this.data.relationship).onChange(
+        (v) => this.data.relationship = v
+      );
     });
-    const companyField = form.createDiv({ cls: "scm-field" });
-    companyField.createEl("label", { text: "Company" });
-    const companyInput = companyField.createEl("input", {
-      type: "text",
-      placeholder: "Acme Corp"
+    new import_obsidian.Setting(contentEl).setName("Follow-up cadence").addDropdown((dd) => {
+      CADENCE_DAYS.forEach((d) => dd.addOption(String(d), `Every ${d} days`));
+      dd.setValue(String(this.data.followupDays)).onChange(
+        (v) => this.data.followupDays = Number(v)
+      );
     });
-    const priorityField = form.createDiv({ cls: "scm-field" });
-    priorityField.createEl("label", { text: "Priority" });
-    const prioritySelect = priorityField.createEl("select");
-    [
-      { value: "high", label: "High (7\u201314 days)" },
-      { value: "medium", label: "Medium (30 days)" },
-      { value: "low", label: "Low (60\u201390 days)" }
-    ].forEach(({ value, label }) => {
-      const opt = prioritySelect.createEl("option", { value, text: label });
-      if (value === "medium")
-        opt.selected = true;
-    });
-    const relField = form.createDiv({ cls: "scm-field" });
-    relField.createEl("label", { text: "Relationship" });
-    const relSelect = relField.createEl("select");
-    [
-      "client",
-      "colleague",
-      "friend",
-      "lead",
-      "mentor",
-      "acquaintance",
-      "other"
-    ].forEach((r) => {
-      const opt = relSelect.createEl("option", { value: r, text: r });
-      if (r === "acquaintance")
-        opt.selected = true;
-    });
-    const cadenceField = form.createDiv({ cls: "scm-field" });
-    cadenceField.createEl("label", { text: "Follow-up cadence (days)" });
-    const cadenceSelect = cadenceField.createEl("select");
-    ["7", "14", "30", "60", "90"].forEach((d) => {
-      const opt = cadenceSelect.createEl("option", {
-        value: d,
-        text: `Every ${d} days`
-      });
-      if (d === "30")
-        opt.selected = true;
-    });
-    const buttons = contentEl.createDiv({ cls: "scm-modal-buttons" });
-    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-    cancelBtn.addEventListener("click", () => this.close());
-    const saveBtn = buttons.createEl("button", {
-      text: "Create Contact",
-      cls: "mod-cta"
-    });
-    saveBtn.addEventListener("click", () => {
-      const name = nameInput.value.trim();
-      if (!name) {
-        new import_obsidian.Notice("Name is required.");
-        nameInput.focus();
-        return;
+    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
+      (btn) => btn.setButtonText("Create contact").setCta().onClick(() => this.submit())
+    );
+    contentEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+        e.preventDefault();
+        this.submit();
       }
-      this.onSubmit({
-        name,
-        email: emailInput.value.trim(),
-        phone: phoneInput.value.trim(),
-        company: companyInput.value.trim(),
-        priority: prioritySelect.value,
-        relationship: relSelect.value,
-        followupDays: parseInt(cadenceSelect.value)
-      });
-      this.close();
     });
-    nameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter")
-        saveBtn.click();
-    });
+  }
+  submit() {
+    this.data.name = this.data.name.trim();
+    if (!this.data.name) {
+      new import_obsidian.Notice("Name is required.");
+      return;
+    }
+    this.onSubmit(this.data);
+    this.close();
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var LogInteractionModal = class extends import_obsidian.Modal {
-  constructor(app, contacts, onSubmit) {
+var ContactSuggestModal = class extends import_obsidian.FuzzySuggestModal {
+  constructor(app, contacts, onChoose) {
     super(app);
     this.contacts = contacts;
+    this.onChoose = onChoose;
+    this.setPlaceholder("Search contacts\u2026");
+  }
+  getItems() {
+    return this.contacts;
+  }
+  getItemText(file) {
+    return file.basename;
+  }
+  onChooseItem(file) {
+    this.onChoose(file);
+  }
+};
+var InteractionNoteModal = class extends import_obsidian.Modal {
+  constructor(app, contact, onSubmit) {
+    super(app);
+    this.note = "";
+    this.contact = contact;
     this.onSubmit = onSubmit;
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: "Log Interaction" });
-    const form = contentEl.createDiv({ cls: "scm-modal-form" });
-    const contactField = form.createDiv({ cls: "scm-field" });
-    contactField.createEl("label", { text: "Contact *" });
-    const searchInput = contactField.createEl("input", {
-      type: "text",
-      placeholder: "Type to search..."
-    });
-    searchInput.focus();
-    const dropdown = contactField.createEl("select", {
-      attr: { size: "6" }
-    });
-    dropdown.style.width = "100%";
-    dropdown.style.marginTop = "4px";
-    const populateDropdown = (filter) => {
-      dropdown.empty();
-      const filtered = this.contacts.filter(
-        (f) => f.basename.toLowerCase().includes(filter.toLowerCase())
-      );
-      filtered.forEach((f) => {
-        dropdown.createEl("option", { value: f.path, text: f.basename });
+    this.titleEl.setText(`Log interaction \u2014 ${this.contact.basename}`);
+    new import_obsidian.Setting(contentEl).setName("Interaction note").addText((text) => {
+      text.setPlaceholder("e.g. Called re: contract renewal").onChange((v) => this.note = v);
+      text.inputEl.focus();
+      text.inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.submit();
+        }
       });
-      if (filtered.length > 0) {
-        dropdown.options[0].selected = true;
-      }
-    };
-    populateDropdown("");
-    searchInput.addEventListener("input", () => {
-      populateDropdown(searchInput.value);
     });
-    const noteField = form.createDiv({ cls: "scm-field" });
-    noteField.createEl("label", { text: "Interaction note *" });
-    const noteInput = noteField.createEl("input", {
-      type: "text",
-      placeholder: "e.g. Called re: contract renewal"
-    });
-    const buttons = contentEl.createDiv({ cls: "scm-modal-buttons" });
-    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-    cancelBtn.addEventListener("click", () => this.close());
-    const saveBtn = buttons.createEl("button", {
-      text: "Log Interaction",
-      cls: "mod-cta"
-    });
-    saveBtn.addEventListener("click", () => {
-      const selectedPath = dropdown.value;
-      const noteText = noteInput.value.trim();
-      if (!selectedPath) {
-        new import_obsidian.Notice("Please select a contact.");
-        return;
-      }
-      if (!noteText) {
-        new import_obsidian.Notice("Please enter an interaction note.");
-        noteInput.focus();
-        return;
-      }
-      const file = this.contacts.find((f) => f.path === selectedPath);
-      if (!file) {
-        new import_obsidian.Notice("Contact not found.");
-        return;
-      }
-      this.onSubmit(file, noteText);
-      this.close();
-    });
-    noteInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter")
-        saveBtn.click();
-    });
+    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
+      (btn) => btn.setButtonText("Log interaction").setCta().onClick(() => this.submit())
+    );
+  }
+  submit() {
+    const note = this.note.trim();
+    if (!note) {
+      new import_obsidian.Notice("Please enter an interaction note.");
+      return;
+    }
+    this.onSubmit(note);
+    this.close();
   }
   onClose() {
     this.contentEl.empty();
@@ -244,60 +196,46 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
     var _a, _b;
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Simple Contact Manager" });
-    containerEl.createEl("p", {
-      text: "Configure folder locations below. Defaults match the standard setup guide. Changes take effect immediately.",
-      cls: "setting-item-description"
-    });
     new import_obsidian.Setting(containerEl).setName("Contacts folder").setDesc(
-      "Folder where new contact notes are created. Default: Contacts"
+      "Folder where new contact notes are created and where the dashboard looks for contacts. If you change this after creating the dashboard, delete the dashboard note and reopen it to regenerate its queries."
     ).addText(
-      (text) => text.setPlaceholder("Contacts").setValue(this.plugin.settings.contactsFolder).onChange(async (value) => {
-        this.plugin.settings.contactsFolder = value.trim() || "Contacts";
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Templates folder").setDesc(
-      "Folder where Contact Template.md is stored. Default: Templates"
-    ).addText(
-      (text) => text.setPlaceholder("Templates").setValue(this.plugin.settings.templatesFolder).onChange(async (value) => {
-        this.plugin.settings.templatesFolder = value.trim() || "Templates";
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.contactsFolder).setValue(this.plugin.settings.contactsFolder).onChange(async (value) => {
+        this.plugin.settings.contactsFolder = value.trim() || DEFAULT_SETTINGS.contactsFolder;
         await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Dashboard note path").setDesc(
-      "Path to your Contact Dashboard note (relative to vault root). Default: Contact Dashboard.md"
+      "Path to your Contact Dashboard note, relative to the vault root."
     ).addText(
-      (text) => text.setPlaceholder("Contact Dashboard.md").setValue(this.plugin.settings.dashboardPath).onChange(async (value) => {
-        this.plugin.settings.dashboardPath = value.trim() || "Contact Dashboard.md";
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.dashboardPath).setValue(this.plugin.settings.dashboardPath).onChange(async (value) => {
+        this.plugin.settings.dashboardPath = value.trim() || DEFAULT_SETTINGS.dashboardPath;
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Actions" });
-    new import_obsidian.Setting(containerEl).setName("Open Contact Dashboard").setDesc("Open the dashboard note in the current pane.").addButton(
-      (btn) => btn.setButtonText("Open Dashboard").onClick(async () => {
+    new import_obsidian.Setting(containerEl).setName("Actions").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Open contact dashboard").setDesc("Open the dashboard note in the current pane.").addButton(
+      (btn) => btn.setButtonText("Open dashboard").onClick(async () => {
         await this.plugin.openDashboard();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Restore default paths").setDesc("Reset all folder paths back to the defaults.").addButton(
-      (btn) => btn.setButtonText("Restore Defaults").setWarning().onClick(async () => {
+      (btn) => btn.setButtonText("Restore defaults").setWarning().onClick(async () => {
         this.plugin.settings = { ...DEFAULT_SETTINGS };
         await this.plugin.saveSettings();
         this.display();
         new import_obsidian.Notice("Paths restored to defaults.");
       })
     );
-    containerEl.createEl("h3", { text: "Dependency status" });
+    new import_obsidian.Setting(containerEl).setName("Dependency status").setHeading();
     const dvInstalled = (_b = (_a = this.app.plugins) == null ? void 0 : _a.enabledPlugins) == null ? void 0 : _b.has(
       "dataview"
     );
-    const statusEl = containerEl.createDiv();
     if (dvInstalled) {
-      statusEl.createEl("p", {
+      containerEl.createEl("p", {
         text: "\u2705 Dataview is installed and enabled."
       });
     } else {
-      const warning = statusEl.createDiv({ cls: "scm-dataview-warning" });
+      const warning = containerEl.createDiv({ cls: "scm-dataview-warning" });
       warning.createEl("strong", { text: "\u26A0\uFE0F Dataview is not enabled." });
       warning.createEl("p", {
         text: "The Contact Dashboard requires the Dataview community plugin. Please install and enable it from Settings \u2192 Community Plugins."
@@ -327,10 +265,6 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     this.addRibbonIcon("contact", "Simple Contact Manager", () => {
       this.openDashboard();
     });
-    console.log("Simple Contact Manager loaded.");
-  }
-  onunload() {
-    console.log("Simple Contact Manager unloaded.");
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -339,46 +273,31 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
   }
   // ── Create Contact ──────────────────────────────────────────────────────
-  async createContact() {
-    new NewContactModal(this.app, this.settings, async (data) => {
+  createContact() {
+    new NewContactModal(this.app, async (data) => {
       await this.writeContactNote(data);
     }).open();
   }
   async writeContactNote(data) {
-    const { name, email, phone, company, priority, relationship, followupDays } = data;
     const todayStr = today();
-    const nextFollowup = addDays(followupDays);
+    const nextFollowup = addDays(data.followupDays);
     const folderPath = this.settings.contactsFolder;
-    const filePath = `${folderPath}/${name}.md`;
-    if (this.app.vault.getAbstractFileByPath(filePath)) {
-      new import_obsidian.Notice(`\u26A0\uFE0F A contact named "${name}" already exists.`);
-      const existing = this.app.vault.getAbstractFileByPath(filePath);
+    const fileName = sanitizeFileName(data.name);
+    const filePath = `${folderPath}/${fileName}.md`;
+    const existing = this.app.vault.getAbstractFileByPath(filePath);
+    if (existing instanceof import_obsidian.TFile) {
+      new import_obsidian.Notice(`\u26A0\uFE0F A contact named "${fileName}" already exists.`);
       await this.app.workspace.getLeaf().openFile(existing);
       return;
     }
     await ensureFolder(this.app, folderPath);
-    const content = [
-      "---",
-      `name: ${name}`,
-      `email: ${email}`,
-      `phone: ${phone}`,
-      `company: ${company}`,
-      `tags: [contact]`,
-      `priority: ${priority}`,
-      `relationship: ${relationship}`,
-      `last_contacted: ${todayStr}`,
-      `followup_days: ${followupDays}`,
-      `next_followup: ${nextFollowup}`,
-      `notes: `,
-      `created: ${todayStr}`,
-      "---",
-      "",
-      `# ${name}`,
+    const body = [
+      `# ${data.name}`,
       "",
       "## Contact Info",
-      `- **Email:** ${email}`,
-      `- **Phone:** ${phone}`,
-      `- **Company:** ${company}`,
+      `- **Email:** ${data.email}`,
+      `- **Phone:** ${data.phone}`,
+      `- **Company:** ${data.company}`,
       "",
       "## Notes",
       "",
@@ -389,14 +308,27 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
       "- Contact created",
       ""
     ].join("\n");
-    const newFile = await this.app.vault.create(filePath, content);
+    const newFile = await this.app.vault.create(filePath, body);
+    await this.app.fileManager.processFrontMatter(newFile, (fm) => {
+      fm.name = data.name;
+      fm.email = data.email;
+      fm.phone = data.phone;
+      fm.company = data.company;
+      fm.tags = ["contact"];
+      fm.priority = data.priority;
+      fm.relationship = data.relationship;
+      fm.last_contacted = todayStr;
+      fm.followup_days = data.followupDays;
+      fm.next_followup = nextFollowup;
+      fm.created = todayStr;
+    });
     await this.app.workspace.getLeaf().openFile(newFile);
     new import_obsidian.Notice(
-      `\u2705 Created contact: ${name} \u2014 next follow-up in ${followupDays} days (${nextFollowup})`
+      `\u2705 Created contact: ${data.name} \u2014 next follow-up in ${data.followupDays} days (${nextFollowup})`
     );
   }
   // ── Log Interaction ─────────────────────────────────────────────────────
-  async logInteraction() {
+  logInteraction() {
     const contactFiles = this.getContactFiles();
     if (contactFiles.length === 0) {
       new import_obsidian.Notice(
@@ -404,48 +336,51 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
       );
       return;
     }
-    new LogInteractionModal(
-      this.app,
-      contactFiles,
-      async (file, noteText) => {
+    new ContactSuggestModal(this.app, contactFiles, (file) => {
+      new InteractionNoteModal(this.app, file, async (noteText) => {
         await this.writeInteractionLog(file, noteText);
-      }
-    ).open();
+      }).open();
+    }).open();
   }
   async writeInteractionLog(file, noteText) {
-    let content = await this.app.vault.read(file);
-    const cache = this.app.metadataCache.getFileCache(file);
-    const fm = cache == null ? void 0 : cache.frontmatter;
-    if (!fm) {
-      new import_obsidian.Notice("Could not read frontmatter from this contact note.");
-      return;
-    }
-    const followupDays = parseInt(fm["followup_days"]) || 30;
+    var _a;
+    const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+    const followupDays = Number(fm == null ? void 0 : fm.followup_days) || 30;
     const todayStr = today();
     const nextFollowup = addDays(followupDays);
-    content = content.replace(
-      /^last_contacted:.*$/m,
-      `last_contacted: ${todayStr}`
-    );
-    content = content.replace(
-      /^next_followup:.*$/m,
-      `next_followup: ${nextFollowup}`
-    );
-    const logEntry = `
-### ${todayStr}
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter.last_contacted = todayStr;
+      frontmatter.next_followup = nextFollowup;
+    });
+    await this.app.vault.process(file, (content) => {
+      const logHeading = /^## Interaction Log$/m;
+      const todayHeading = `### ${todayStr}`;
+      if (!logHeading.test(content)) {
+        return `${content.trimEnd()}
+
+## Interaction Log
+
+${todayHeading}
 - ${noteText}
 `;
-    if (content.includes("## Interaction Log")) {
-      content = content.replace(
-        /## Interaction Log/,
-        `## Interaction Log${logEntry}`
+      }
+      const todayAtTop = new RegExp(
+        `^## Interaction Log\\n+${todayHeading}$`,
+        "m"
       );
-    } else {
-      content += `
-## Interaction Log
-${logEntry}`;
-    }
-    await this.app.vault.modify(file, content);
+      if (todayAtTop.test(content)) {
+        return content.replace(todayAtTop, (match) => `${match}
+- ${noteText}`);
+      }
+      return content.replace(
+        logHeading,
+        (match) => `${match}
+
+${todayHeading}
+- ${noteText}
+`
+      );
+    });
     new import_obsidian.Notice(
       `\u2705 Logged interaction for ${file.basename} \u2014 next follow-up: ${nextFollowup}`
     );
@@ -454,7 +389,7 @@ ${logEntry}`;
   async openDashboard() {
     const dashPath = this.settings.dashboardPath;
     let file = this.app.vault.getAbstractFileByPath(dashPath);
-    if (!file) {
+    if (!(file instanceof import_obsidian.TFile)) {
       file = await this.createDashboard(dashPath);
       if (!file)
         return;
@@ -552,14 +487,15 @@ ${logEntry}`;
       "```"
     ].join("\n");
     try {
-      const parts = dashPath.split("/");
-      if (parts.length > 1) {
-        const parentFolder = parts.slice(0, -1).join("/");
+      const parentFolder = dashPath.split("/").slice(0, -1).join("/");
+      if (parentFolder) {
         await ensureFolder(this.app, parentFolder);
       }
       return await this.app.vault.create(dashPath, content);
     } catch (e) {
-      new import_obsidian.Notice(`Could not create dashboard at "${dashPath}". Check the path in plugin settings.`);
+      new import_obsidian.Notice(
+        `Could not create dashboard at "${dashPath}". Check the path in plugin settings.`
+      );
       return null;
     }
   }
@@ -567,14 +503,14 @@ ${logEntry}`;
   getContactFiles() {
     const folder = this.settings.contactsFolder;
     return this.app.vault.getMarkdownFiles().filter((f) => {
-      var _a;
+      var _a, _b;
       if (!f.path.startsWith(folder + "/"))
         return false;
-      const fm = (_a = this.app.metadataCache.getFileCache(f)) == null ? void 0 : _a.frontmatter;
-      if (!fm)
+      const cache = this.app.metadataCache.getFileCache(f);
+      if (!cache)
         return false;
-      const tags = Array.isArray(fm.tags) ? fm.tags : [fm.tags];
-      return tags.includes("contact") && fm.is_template !== true;
+      const tags = (_a = (0, import_obsidian.getAllTags)(cache)) != null ? _a : [];
+      return tags.includes("#contact") && ((_b = cache.frontmatter) == null ? void 0 : _b.is_template) !== true;
     });
   }
 };

@@ -11,7 +11,7 @@ An Obsidian plugin that turns your vault into a lightweight contact relationship
 - **New Contact** command — guided form creates a fully-formed contact note in your Contacts folder
 - **Log Interaction** command — fuzzy-search your contacts, add a note, and automatically reset the follow-up timer
 - **Open Dashboard** command — opens (or creates) a live Dataview dashboard sorted by overdue → due today → upcoming 7 days → upcoming 30 days → all contacts
-- **Settings page** — configure the contacts folder, templates folder, and dashboard path; defaults work out of the box
+- **Settings page** — configure the contacts folder and dashboard path; defaults work out of the box
 - **Ribbon icon** — one-click access to the dashboard
 - **No Templater or QuickAdd required** — all contact creation and interaction logging is handled natively by the plugin
 
@@ -39,7 +39,7 @@ An Obsidian plugin that turns your vault into a lightweight contact relationship
 
 1. Install and enable the **Dataview** community plugin if you haven't already
 2. Enable Simple Contact Manager
-3. Optionally open Settings → Simple Contact Manager to adjust folder paths (defaults: `Contacts/`, `Templates/`, `Contact Dashboard.md`)
+3. Optionally open Settings → Simple Contact Manager to adjust folder paths (defaults: `Contacts/`, `Contact Dashboard.md`)
 4. Run **Simple Contact Manager: New contact** from the Command Palette to create your first contact
 5. Assign hotkeys in Settings → Hotkeys if desired (search "Simple Contact Manager")
 
@@ -71,7 +71,6 @@ relationship: colleague
 last_contacted: 2026-05-01
 followup_days: 30
 next_followup: 2026-05-31
-notes: 
 created: 2026-05-01
 ---
 ```
@@ -84,9 +83,10 @@ The plugin manages `last_contacted` and `next_followup` automatically when you l
 
 | Setting | Default | Description |
 |---|---|---|
-| Contacts folder | `Contacts` | Where new contact notes are created |
-| Templates folder | `Templates` | Where your Contact Template lives (used by Templater if you still use it) |
+| Contacts folder | `Contacts` | Where new contact notes are created and where the dashboard queries look |
 | Dashboard note path | `Contact Dashboard.md` | Path to the dashboard note, relative to vault root |
+
+> **Note:** the dashboard's Dataview queries are generated with the contacts folder baked in. If you change the folder later, delete the dashboard note and reopen it (via the command or ribbon icon) to regenerate it.
 
 ---
 
