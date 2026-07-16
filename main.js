@@ -381,10 +381,35 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
      * check `version` and fall back to scanning contact notes if it is absent.
      */
     this.api = {
-      version: 1,
+      version: 2,
       /** Today + overdue triage rows, overdue first then by priority. */
-      getContactsSummary: () => this.contactsSummary()
+      getContactsSummary: () => this.contactsSummary(),
+      /** Open the interaction-note modal for a specific contact (by vault path or
+       * contact name) and log it — so a companion UI can log against a contact it
+       * already has in hand, without re-selecting from a picker. Returns true if
+       * the contact was found. */
+      logInteraction: (pathOrName) => {
+        var _a;
+        let file = this.app.vault.getAbstractFileByPath(pathOrName);
+        if (!(file instanceof import_obsidian.TFile)) {
+          file = (_a = this.getContactFiles().find(
+            (f) => f.path === pathOrName || f.basename === pathOrName
+          )) != null ? _a : null;
+        }
+        if (file instanceof import_obsidian.TFile) {
+          this.logInteractionForFile(file);
+          return true;
+        }
+        return false;
+      }
     };
+  }
+  /** Open the interaction-note modal for `file` and write the result, reusing
+   * the same flow as the command. */
+  logInteractionForFile(file) {
+    new InteractionNoteModal(this.app, file, async (noteText) => {
+      await this.writeInteractionLog(file, noteText);
+    }).open();
   }
   contactsSummary() {
     const todayStr = today();
