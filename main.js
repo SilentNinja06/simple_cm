@@ -30,7 +30,11 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   contactsFolder: "Contacts",
-  dashboardPath: "Contact Dashboard.md"
+  dashboardPath: "Contact Dashboard.md",
+  dailyNoteLinking: true,
+  createDailyNoteIfMissing: true,
+  dailyNoteMarker: "%% crm-log %%",
+  dailyNoteHeading: "Contacts reached"
 };
 var PRIORITIES = ["high", "medium", "low"];
 var PRIORITY_LABELS = {
@@ -61,6 +65,103 @@ async function ensureFolder(app, folderPath) {
   if (!app.vault.getAbstractFileByPath(folderPath)) {
     await app.vault.createFolder(folderPath);
   }
+}
+function getDailyNotesOptions(app) {
+  var _a, _b, _c, _d;
+  const dn = (_b = (_a = app.internalPlugins) == null ? void 0 : _a.getPluginById) == null ? void 0 : _b.call(_a, "daily-notes");
+  return (_d = (_c = dn == null ? void 0 : dn.instance) == null ? void 0 : _c.options) != null ? _d : {};
+}
+var CRM_LOG_LINE = /^- \d{2}:\d{2} \[\[/;
+async function linkInteractionIntoDailyNote(app, settings, contactName, descriptor) {
+  var _a;
+  if (!settings.dailyNoteLinking)
+    return;
+  try {
+    const opts = getDailyNotesOptions(app);
+    const format = opts.format || "YYYY-MM-DD";
+    const folder = ((_a = opts.folder) != null ? _a : "").trim().replace(/\/+$/, "");
+    const date = (0, import_obsidian.moment)().format("YYYY-MM-DD");
+    const time = (0, import_obsidian.moment)().format("HH:mm");
+    const dailyName = (0, import_obsidian.moment)(date, "YYYY-MM-DD").format(format);
+    const path = (0, import_obsidian.normalizePath)((folder ? folder + "/" : "") + dailyName + ".md");
+    let file = app.vault.getAbstractFileByPath(path);
+    if (!file) {
+      if (!settings.createDailyNoteIfMissing)
+        return;
+      await ensureParentFolder(app, path);
+      const body = await renderDailyTemplate(app, opts, path, date);
+      file = await app.vault.create(path, body);
+    }
+    if (!(file instanceof import_obsidian.TFile))
+      return;
+    const line = `- ${time} [[${contactName}|${contactName}]] \u2014 ${descriptor}`;
+    await app.vault.process(
+      file,
+      (content) => insertCrmLogLine(content, line, settings, time)
+    );
+  } catch (e) {
+    console.error("Simple Contact Manager: daily note linking failed", e);
+  }
+}
+async function ensureParentFolder(app, path) {
+  const dir = path.split("/").slice(0, -1).join("/");
+  if (!dir)
+    return;
+  if (app.vault.getAbstractFileByPath(dir) instanceof import_obsidian.TFolder)
+    return;
+  await app.vault.createFolder(dir).catch(() => {
+  });
+}
+async function renderDailyTemplate(app, opts, dailyPath, date) {
+  var _a, _b, _c;
+  const templateSetting = ((_a = opts.template) != null ? _a : "").trim();
+  if (!templateSetting)
+    return "";
+  const templatePath = (0, import_obsidian.normalizePath)(
+    templateSetting.endsWith(".md") ? templateSetting : templateSetting + ".md"
+  );
+  const tFile = app.vault.getAbstractFileByPath(templatePath);
+  if (!(tFile instanceof import_obsidian.TFile))
+    return "";
+  const raw = await app.vault.cachedRead(tFile);
+  const basename = (_c = (_b = dailyPath.split("/").pop()) == null ? void 0 : _b.replace(/\.md$/, "")) != null ? _c : "";
+  const m = (0, import_obsidian.moment)(date, "YYYY-MM-DD");
+  const now = (0, import_obsidian.moment)();
+  return raw.replace(/{{\s*title\s*}}/gi, basename).replace(/{{\s*date(?::([^}]+))?\s*}}/gi, (_, fmt) => m.format(fmt || "YYYY-MM-DD")).replace(/{{\s*time(?::([^}]+))?\s*}}/gi, (_, fmt) => now.format(fmt || "HH:mm"));
+}
+function insertCrmLogLine(content, line, settings, time) {
+  const lines = content.split("\n");
+  if (lines.some((l) => l.trim() === line.trim()))
+    return content;
+  const marker = settings.dailyNoteMarker.trim();
+  let anchor = -1;
+  if (marker)
+    anchor = lines.findIndex((l) => l.includes(marker));
+  if (anchor === -1) {
+    const heading = settings.dailyNoteHeading.trim().toLowerCase().replace(/:$/, "");
+    if (heading) {
+      anchor = lines.findIndex((l) => {
+        const m = l.match(/^#{1,6}\s+(.*?)\s*$/);
+        return !!m && m[1].trim().toLowerCase().replace(/:$/, "") === heading;
+      });
+    }
+  }
+  if (anchor === -1) {
+    const heading = settings.dailyNoteHeading.trim() || "Contacts reached";
+    const trimmed = content.replace(/\n+$/, "");
+    return (trimmed ? trimmed + "\n\n" : "") + `# ${heading}
+${line}
+`;
+  }
+  let insertAt = anchor + 1;
+  while (insertAt < lines.length && CRM_LOG_LINE.test(lines[insertAt])) {
+    const existingTime = lines[insertAt].slice(2, 7);
+    if (existingTime > time)
+      break;
+    insertAt++;
+  }
+  lines.splice(insertAt, 0, line);
+  return lines.join("\n");
 }
 var NewContactModal = class extends import_obsidian.Modal {
   constructor(app, onSubmit) {
@@ -212,6 +313,35 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Daily note").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Log interactions into the daily note").setDesc(
+      "When you log an interaction, also write a line into that day's daily note under the marker/heading below."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.dailyNoteLinking).onChange(async (v) => {
+        this.plugin.settings.dailyNoteLinking = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Create the daily note if missing").setDesc("Seed a new daily note from the Daily Notes core template when one doesn't exist yet.").addToggle(
+      (t) => t.setValue(this.plugin.settings.createDailyNoteIfMissing).onChange(async (v) => {
+        this.plugin.settings.createDailyNoteIfMissing = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Placement marker").setDesc(
+      "Interactions are inserted after this marker if the daily note contains it (invisible in reading view)."
+    ).addText(
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.dailyNoteMarker).setValue(this.plugin.settings.dailyNoteMarker).onChange(async (value) => {
+        this.plugin.settings.dailyNoteMarker = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Fallback heading").setDesc("If the marker isn't found, interactions go under this heading; a heading is appended only as a last resort.").addText(
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.dailyNoteHeading).setValue(this.plugin.settings.dailyNoteHeading).onChange(async (value) => {
+        this.plugin.settings.dailyNoteHeading = value.trim() || DEFAULT_SETTINGS.dailyNoteHeading;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Actions").setHeading();
     new import_obsidian.Setting(containerEl).setName("Open contact dashboard").setDesc("Open the dashboard note in the current pane.").addButton(
       (btn) => btn.setButtonText("Open dashboard").onClick(async () => {
@@ -244,6 +374,44 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
   }
 };
 var SimpleCMPlugin = class extends import_obsidian.Plugin {
+  constructor() {
+    super(...arguments);
+    /**
+     * Read-only API for companion plugins (e.g. the MERIDIAN dashboard). Consumers
+     * check `version` and fall back to scanning contact notes if it is absent.
+     */
+    this.api = {
+      version: 1,
+      /** Today + overdue triage rows, overdue first then by priority. */
+      getContactsSummary: () => this.contactsSummary()
+    };
+  }
+  contactsSummary() {
+    const todayStr = today();
+    const rank = { high: 0, medium: 1, low: 2, "": 3 };
+    const rows = this.getContactFiles().map((file) => {
+      var _a, _b, _c, _d, _e;
+      const fm = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
+      const last = String((_c = fm.last_contacted) != null ? _c : "").slice(0, 10);
+      const next = String((_d = fm.next_followup) != null ? _d : "").slice(0, 10);
+      const priority = ["high", "medium", "low"].includes(String(fm.priority)) ? String(fm.priority) : "";
+      return {
+        name: String((_e = fm.name) != null ? _e : file.basename),
+        path: file.path,
+        priority,
+        daysSince: last ? (0, import_obsidian.moment)(todayStr).diff((0, import_obsidian.moment)(last, "YYYY-MM-DD"), "days") : null,
+        nextFollowup: next,
+        overdue: !!next && next < todayStr,
+        dueToday: !!next && next === todayStr
+      };
+    });
+    rows.sort((a, b) => {
+      var _a, _b;
+      const bucket = (r) => r.overdue ? 0 : r.dueToday ? 1 : 2;
+      return bucket(a) - bucket(b) || rank[a.priority] - rank[b.priority] || ((_a = b.daysSince) != null ? _a : -1) - ((_b = a.daysSince) != null ? _b : -1);
+    });
+    return rows;
+  }
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new SimpleCMSettingTab(this.app, this));
@@ -343,7 +511,7 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     }).open();
   }
   async writeInteractionLog(file, noteText) {
-    var _a;
+    var _a, _b;
     const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const followupDays = Number(fm == null ? void 0 : fm.followup_days) || 30;
     const todayStr = today();
@@ -381,6 +549,8 @@ ${todayHeading}
 `
       );
     });
+    const contactName = String((_b = fm == null ? void 0 : fm.name) != null ? _b : file.basename);
+    await linkInteractionIntoDailyNote(this.app, this.settings, contactName, noteText);
     new import_obsidian.Notice(
       `\u2705 Logged interaction for ${file.basename} \u2014 next follow-up: ${nextFollowup}`
     );
