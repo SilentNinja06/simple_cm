@@ -7,8 +7,10 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  TFolder,
   getAllTags,
   moment,
+  normalizePath,
 } from "obsidian";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -16,11 +18,19 @@ import {
 interface SimpleCMSettings {
   contactsFolder: string;
   dashboardPath: string;
+  dailyNoteLinking: boolean;
+  createDailyNoteIfMissing: boolean;
+  dailyNoteMarker: string;
+  dailyNoteHeading: string;
 }
 
 const DEFAULT_SETTINGS: SimpleCMSettings = {
   contactsFolder: "Contacts",
   dashboardPath: "Contact Dashboard.md",
+  dailyNoteLinking: true,
+  createDailyNoteIfMissing: true,
+  dailyNoteMarker: "%% crm-log %%",
+  dailyNoteHeading: "Contacts reached",
 };
 
 const PRIORITIES = ["high", "medium", "low"] as const;
@@ -74,6 +84,130 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
   if (!app.vault.getAbstractFileByPath(folderPath)) {
     await app.vault.createFolder(folderPath);
   }
+}
+
+// ── Daily note writer ─────────────────────────────────────────────────────────
+// Mirrors the marker-first / heading / append-fallback resolution and core
+// Daily Notes path resolution used by the ARFID and Spiral & Shutdown plugins,
+// so "who I talked to today" is written at log time into the daily note.
+
+interface DailyNotesOptions {
+  folder?: string;
+  format?: string;
+  template?: string;
+}
+
+function getDailyNotesOptions(app: App): DailyNotesOptions {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dn = (app as any).internalPlugins?.getPluginById?.("daily-notes");
+  return dn?.instance?.options ?? {};
+}
+
+/** Only lines this plugin wrote count when keeping chronological order. */
+const CRM_LOG_LINE = /^- \d{2}:\d{2} \[\[/;
+
+/** Insert a `- HH:MM [[Name|Name]] — descriptor` line into today's daily note,
+ * honoring the marker, then the heading, then an appended heading last. */
+async function linkInteractionIntoDailyNote(
+  app: App,
+  settings: SimpleCMSettings,
+  contactName: string,
+  descriptor: string,
+): Promise<void> {
+  if (!settings.dailyNoteLinking) return;
+  try {
+    const opts = getDailyNotesOptions(app);
+    const format = opts.format || "YYYY-MM-DD";
+    const folder = (opts.folder ?? "").trim().replace(/\/+$/, "");
+    const date = moment().format("YYYY-MM-DD");
+    const time = moment().format("HH:mm");
+    const dailyName = moment(date, "YYYY-MM-DD").format(format);
+    const path = normalizePath((folder ? folder + "/" : "") + dailyName + ".md");
+
+    let file = app.vault.getAbstractFileByPath(path);
+    if (!file) {
+      if (!settings.createDailyNoteIfMissing) return;
+      await ensureParentFolder(app, path);
+      const body = await renderDailyTemplate(app, opts, path, date);
+      file = await app.vault.create(path, body);
+    }
+    if (!(file instanceof TFile)) return;
+
+    const line = `- ${time} [[${contactName}|${contactName}]] — ${descriptor}`;
+    await app.vault.process(file, (content) =>
+      insertCrmLogLine(content, line, settings, time),
+    );
+  } catch (e) {
+    // Daily-note linking is a convenience; never block logging the interaction.
+    console.error("Simple Contact Manager: daily note linking failed", e);
+  }
+}
+
+async function ensureParentFolder(app: App, path: string): Promise<void> {
+  const dir = path.split("/").slice(0, -1).join("/");
+  if (!dir) return;
+  if (app.vault.getAbstractFileByPath(dir) instanceof TFolder) return;
+  await app.vault.createFolder(dir).catch(() => {});
+}
+
+async function renderDailyTemplate(
+  app: App,
+  opts: DailyNotesOptions,
+  dailyPath: string,
+  date: string,
+): Promise<string> {
+  const templateSetting = (opts.template ?? "").trim();
+  if (!templateSetting) return "";
+  const templatePath = normalizePath(
+    templateSetting.endsWith(".md") ? templateSetting : templateSetting + ".md",
+  );
+  const tFile = app.vault.getAbstractFileByPath(templatePath);
+  if (!(tFile instanceof TFile)) return "";
+  const raw = await app.vault.cachedRead(tFile);
+  const basename = dailyPath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+  const m = moment(date, "YYYY-MM-DD");
+  const now = moment();
+  return raw
+    .replace(/{{\s*title\s*}}/gi, basename)
+    .replace(/{{\s*date(?::([^}]+))?\s*}}/gi, (_, fmt) => m.format(fmt || "YYYY-MM-DD"))
+    .replace(/{{\s*time(?::([^}]+))?\s*}}/gi, (_, fmt) => now.format(fmt || "HH:mm"));
+}
+
+function insertCrmLogLine(
+  content: string,
+  line: string,
+  settings: SimpleCMSettings,
+  time: string,
+): string {
+  const lines = content.split("\n");
+  if (lines.some((l) => l.trim() === line.trim())) return content;
+
+  const marker = settings.dailyNoteMarker.trim();
+  let anchor = -1;
+  if (marker) anchor = lines.findIndex((l) => l.includes(marker));
+  if (anchor === -1) {
+    const heading = settings.dailyNoteHeading.trim().toLowerCase().replace(/:$/, "");
+    if (heading) {
+      anchor = lines.findIndex((l) => {
+        const m = l.match(/^#{1,6}\s+(.*?)\s*$/);
+        return !!m && m[1].trim().toLowerCase().replace(/:$/, "") === heading;
+      });
+    }
+  }
+  if (anchor === -1) {
+    const heading = settings.dailyNoteHeading.trim() || "Contacts reached";
+    const trimmed = content.replace(/\n+$/, "");
+    return (trimmed ? trimmed + "\n\n" : "") + `# ${heading}\n${line}\n`;
+  }
+
+  let insertAt = anchor + 1;
+  while (insertAt < lines.length && CRM_LOG_LINE.test(lines[insertAt])) {
+    const existingTime = lines[insertAt].slice(2, 7);
+    if (existingTime > time) break;
+    insertAt++;
+  }
+  lines.splice(insertAt, 0, line);
+  return lines.join("\n");
 }
 
 // ── New Contact Modal ─────────────────────────────────────────────────────────
@@ -294,6 +428,59 @@ class SimpleCMSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl).setName("Daily note").setHeading();
+
+    new Setting(containerEl)
+      .setName("Log interactions into the daily note")
+      .setDesc(
+        "When you log an interaction, also write a line into that day's daily note under the marker/heading below."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.dailyNoteLinking).onChange(async (v) => {
+          this.plugin.settings.dailyNoteLinking = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Create the daily note if missing")
+      .setDesc("Seed a new daily note from the Daily Notes core template when one doesn't exist yet.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.createDailyNoteIfMissing).onChange(async (v) => {
+          this.plugin.settings.createDailyNoteIfMissing = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Placement marker")
+      .setDesc(
+        "Interactions are inserted after this marker if the daily note contains it (invisible in reading view)."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.dailyNoteMarker)
+          .setValue(this.plugin.settings.dailyNoteMarker)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyNoteMarker = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Fallback heading")
+      .setDesc("If the marker isn't found, interactions go under this heading; a heading is appended only as a last resort.")
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.dailyNoteHeading)
+          .setValue(this.plugin.settings.dailyNoteHeading)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyNoteHeading =
+              value.trim() || DEFAULT_SETTINGS.dailyNoteHeading;
+            await this.plugin.saveSettings();
+          })
+      );
+
     new Setting(containerEl).setName("Actions").setHeading();
 
     new Setting(containerEl)
@@ -343,6 +530,47 @@ class SimpleCMSettingTab extends PluginSettingTab {
 
 export default class SimpleCMPlugin extends Plugin {
   settings: SimpleCMSettings;
+
+  /**
+   * Read-only API for companion plugins (e.g. the MERIDIAN dashboard). Consumers
+   * check `version` and fall back to scanning contact notes if it is absent.
+   */
+  public api = {
+    version: 1,
+    /** Today + overdue triage rows, overdue first then by priority. */
+    getContactsSummary: () => this.contactsSummary(),
+  };
+
+  private contactsSummary() {
+    const todayStr = today();
+    const rank: Record<string, number> = { high: 0, medium: 1, low: 2, "": 3 };
+    const rows = this.getContactFiles().map((file) => {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+      const last = String(fm.last_contacted ?? "").slice(0, 10);
+      const next = String(fm.next_followup ?? "").slice(0, 10);
+      const priority = ["high", "medium", "low"].includes(String(fm.priority))
+        ? String(fm.priority)
+        : "";
+      return {
+        name: String(fm.name ?? file.basename),
+        path: file.path,
+        priority,
+        daysSince: last ? moment(todayStr).diff(moment(last, "YYYY-MM-DD"), "days") : null,
+        nextFollowup: next,
+        overdue: !!next && next < todayStr,
+        dueToday: !!next && next === todayStr,
+      };
+    });
+    rows.sort((a, b) => {
+      const bucket = (r: typeof a) => (r.overdue ? 0 : r.dueToday ? 1 : 2);
+      return (
+        bucket(a) - bucket(b) ||
+        rank[a.priority] - rank[b.priority] ||
+        (b.daysSince ?? -1) - (a.daysSince ?? -1)
+      );
+    });
+    return rows;
+  }
 
   async onload() {
     await this.loadSettings();
@@ -497,6 +725,12 @@ export default class SimpleCMPlugin extends Plugin {
         (match) => `${match}\n\n${todayHeading}\n- ${noteText}\n`
       );
     });
+
+    // Mirror the interaction into today's daily note at log time (§8.3) — this
+    // keeps "who I talked to today" correct even on days the dashboard is never
+    // opened, and captures interactions logged from the command palette.
+    const contactName = String(fm?.name ?? file.basename);
+    await linkInteractionIntoDailyNote(this.app, this.settings, contactName, noteText);
 
     new Notice(
       `✅ Logged interaction for ${file.basename} — next follow-up: ${nextFollowup}`
