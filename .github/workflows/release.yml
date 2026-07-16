@@ -1,14 +1,17 @@
-name: Release Obsidian plugin
+name: Release
 
+# A release is cut whenever the version in manifest.json has no tag yet:
+# on branch pushes (version bump = release), on manual runs, and on tag
+# pushes. Pushes whose manifest version is already released do nothing. Assets
+# are uploaded with --clobber so an existing release is repaired rather than
+# left empty. (No lockfile in this repo, so we use `npm install`.)
 on:
   push:
     tags:
       - "*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Version to release (must match manifest.json version, e.g. 2.1.0)"
-        required: true
+    branches:
+      - "**"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -28,17 +31,41 @@ jobs:
           npm install
           npm run build
 
-      - name: Create release
+      - name: Determine version
+        id: version
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already tagged
+        id: state
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag
+        if: steps.state.outputs.tag_exists == 'false' && !startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create or update release
+        if: steps.state.outputs.tag_exists == 'false' || github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            tag="${{ github.event.inputs.tag }}"
-          else
-            tag="${GITHUB_REF#refs/tags/}"
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              --target "$GITHUB_SHA" \
+              --title "$VERSION" \
+              --notes "Simple Contact Manager $VERSION — install via BRAT or copy main.js, manifest.json, and styles.css into .obsidian/plugins/simple-contact-manager/."
           fi
-          gh release create "$tag" \
-            --target "$GITHUB_SHA" \
-            --title "$tag" \
-            --generate-notes \
-            main.js manifest.json styles.css
+          gh release upload "$VERSION" main.js manifest.json styles.css --clobber
