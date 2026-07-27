@@ -425,17 +425,25 @@ export default class SimpleCMPlugin extends Plugin {
     const newFile = await this.app.vault.create(filePath, body);
 
     await this.app.fileManager.processFrontMatter(newFile, (fm) => {
+      // Unified frontmatter schema (docs/frontmatter-schema.md): core keys flat,
+      // contact-specific fields nested under `contact:`. name/email/phone stay
+      // flat (shared keys).
+      fm.type = "contact";
+      fm.status = "active";
       fm.name = data.name;
       fm.email = data.email;
       fm.phone = data.phone;
-      fm.company = data.company;
       fm.tags = ["contact"];
-      fm.priority = data.priority;
-      fm.relationship = data.relationship;
-      fm.last_contacted = todayStr;
-      fm.followup_days = data.followupDays;
-      fm.next_followup = nextFollowup;
       fm.created = todayStr;
+      fm.updated = todayStr;
+      fm.contact = {
+        company: data.company,
+        priority: data.priority,
+        relationship: data.relationship,
+        last_contacted: todayStr,
+        followup_days: data.followupDays,
+        next_followup: nextFollowup,
+      };
     });
 
     await this.app.workspace.getLeaf().openFile(newFile);
@@ -465,13 +473,34 @@ export default class SimpleCMPlugin extends Plugin {
 
   async writeInteractionLog(file: TFile, noteText: string) {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    const followupDays = Number(fm?.followup_days) || 30;
+    // Read nested schema first, fall back to legacy flat keys for any contact
+    // note authored before the frontmatter migration.
+    const followupDays =
+      Number(fm?.contact?.followup_days ?? fm?.followup_days) || 30;
     const todayStr = today();
     const nextFollowup = addDays(followupDays);
 
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter.last_contacted = todayStr;
-      frontmatter.next_followup = nextFollowup;
+      const contact =
+        frontmatter.contact && typeof frontmatter.contact === "object"
+          ? frontmatter.contact
+          : (frontmatter.contact = {});
+      contact.last_contacted = todayStr;
+      contact.next_followup = nextFollowup;
+      frontmatter.updated = todayStr;
+      // Fold any legacy flat keys into the nested block so the note ends up
+      // schema-clean after its first logged interaction.
+      for (const k of [
+        "last_contacted",
+        "next_followup",
+        "followup_days",
+        "priority",
+        "relationship",
+        "company",
+      ]) {
+        if (k in frontmatter && !(k in contact)) contact[k] = frontmatter[k];
+        delete frontmatter[k];
+      }
     });
 
     await this.app.vault.process(file, (content) => {
@@ -533,12 +562,12 @@ export default class SimpleCMPlugin extends Plugin {
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  last_contacted AS "Last Contacted",',
-      '  next_followup AS "Was Due"',
+      '  contact.priority AS "Priority",',
+      '  contact.last_contacted AS "Last Contacted",',
+      '  contact.next_followup AS "Was Due"',
       `FROM "${folder}"`,
-      "WHERE next_followup < date(today) AND is_template != true",
-      "SORT priority DESC, next_followup ASC",
+      "WHERE contact.next_followup < date(today) AND is_template != true",
+      "SORT contact.priority DESC, contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -549,11 +578,11 @@ export default class SimpleCMPlugin extends Plugin {
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  last_contacted AS "Last Contacted"',
+      '  contact.priority AS "Priority",',
+      '  contact.last_contacted AS "Last Contacted"',
       `FROM "${folder}"`,
-      "WHERE next_followup = date(today) AND is_template != true",
-      "SORT priority DESC",
+      "WHERE contact.next_followup = date(today) AND is_template != true",
+      "SORT contact.priority DESC",
       "```",
       "",
       "---",
@@ -564,12 +593,12 @@ export default class SimpleCMPlugin extends Plugin {
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  next_followup AS "Follow-up Date",',
-      '  (next_followup - date(today)).days + " days" AS "In"',
+      '  contact.priority AS "Priority",',
+      '  contact.next_followup AS "Follow-up Date",',
+      '  (contact.next_followup - date(today)).days + " days" AS "In"',
       `FROM "${folder}"`,
-      "WHERE next_followup > date(today) AND next_followup <= date(today) + dur(7 days) AND is_template != true",
-      "SORT next_followup ASC",
+      "WHERE contact.next_followup > date(today) AND contact.next_followup <= date(today) + dur(7 days) AND is_template != true",
+      "SORT contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -580,12 +609,12 @@ export default class SimpleCMPlugin extends Plugin {
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  next_followup AS "Follow-up Date",',
-      '  (next_followup - date(today)).days + " days" AS "In"',
+      '  contact.priority AS "Priority",',
+      '  contact.next_followup AS "Follow-up Date",',
+      '  (contact.next_followup - date(today)).days + " days" AS "In"',
       `FROM "${folder}"`,
-      "WHERE next_followup > date(today) + dur(7 days) AND next_followup <= date(today) + dur(30 days) AND is_template != true",
-      "SORT next_followup ASC",
+      "WHERE contact.next_followup > date(today) + dur(7 days) AND contact.next_followup <= date(today) + dur(30 days) AND is_template != true",
+      "SORT contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -596,15 +625,15 @@ export default class SimpleCMPlugin extends Plugin {
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Name",`,
       '  email AS "Email",',
-      '  company AS "Company",',
-      '  priority AS "Priority",',
-      '  relationship AS "Type",',
-      '  last_contacted AS "Last Contacted",',
-      '  next_followup AS "Next Follow-up",',
-      '  followup_days AS "Cadence (days)"',
+      '  contact.company AS "Company",',
+      '  contact.priority AS "Priority",',
+      '  contact.relationship AS "Type",',
+      '  contact.last_contacted AS "Last Contacted",',
+      '  contact.next_followup AS "Next Follow-up",',
+      '  contact.followup_days AS "Cadence (days)"',
       `FROM "${folder}"`,
       "WHERE is_template != true",
-      "SORT priority DESC, name ASC",
+      "SORT contact.priority DESC, name ASC",
       "```",
     ].join("\n");
 
