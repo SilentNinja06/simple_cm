@@ -30,7 +30,9 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   contactsFolder: "Contacts",
-  dashboardPath: "Contact Dashboard.md"
+  dashboardPath: "Contact Dashboard.md",
+  dashboardEngine: "dataview",
+  basePath: "Contacts.base"
 };
 var PRIORITIES = ["high", "medium", "low"];
 var PRIORITY_LABELS = {
@@ -209,6 +211,22 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
     ).addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.dashboardPath).setValue(this.plugin.settings.dashboardPath).onChange(async (value) => {
         this.plugin.settings.dashboardPath = value.trim() || DEFAULT_SETTINGS.dashboardPath;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Dashboard engine").setDesc(
+      "Dataview keeps the classic tables. Bases (beta) generates a reusable Contacts.base with saved views (Overdue, Due Today, Next 7/30 Days, All) and embeds it \u2014 lighter on mobile. After changing this, delete the dashboard note and re-open it to regenerate."
+    ).addDropdown(
+      (dd) => dd.addOption("dataview", "Dataview (classic tables)").addOption("bases", "Bases (saved views, beta)").setValue(this.plugin.settings.dashboardEngine).onChange(async (value) => {
+        this.plugin.settings.dashboardEngine = value === "bases" ? "bases" : "dataview";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Base file path").setDesc(
+      "Path of the generated base file, used when the engine is Bases."
+    ).addText(
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.basePath).setValue(this.plugin.settings.basePath).onChange(async (value) => {
+        this.plugin.settings.basePath = value.trim() || DEFAULT_SETTINGS.basePath;
         await this.plugin.saveSettings();
       })
     );
@@ -416,6 +434,9 @@ ${todayHeading}
     await this.app.workspace.getLeaf().openFile(file);
   }
   async createDashboard(dashPath) {
+    if (this.settings.dashboardEngine === "bases") {
+      return this.createDashboardBases(dashPath);
+    }
     const folder = this.settings.contactsFolder;
     const content = [
       "# \u{1F4C7} Contact Dashboard",
@@ -514,6 +535,123 @@ ${todayHeading}
     } catch (e) {
       new import_obsidian.Notice(
         `Could not create dashboard at "${dashPath}". Check the path in plugin settings.`
+      );
+      return null;
+    }
+  }
+  // ── Bases dashboard (Workstream B) ───────────────────────────────────────
+  /** One reusable base with saved views, replacing the five near-duplicate
+   * Dataview tables. Nested contact.* keys are dot-accessible; date() forces
+   * date typing on the nested values. Kept in sync with Contacts.base. */
+  buildContactsBase() {
+    return `filters:
+  and:
+    - file.hasTag("contact")
+    - 'note.is_template != true'
+formulas:
+  last_contact_age: 'today() - date(contact.last_contacted)'
+  due_in: 'date(contact.next_followup) - today()'
+properties:
+  file.name:
+    displayName: Contact
+  contact.priority:
+    displayName: Priority
+  contact.relationship:
+    displayName: Type
+  contact.company:
+    displayName: Company
+  contact.last_contacted:
+    displayName: Last Contacted
+  contact.next_followup:
+    displayName: Next Follow-up
+  contact.followup_days:
+    displayName: Cadence (days)
+  formula.last_contact_age:
+    displayName: Last Contact Age
+  formula.due_in:
+    displayName: In
+views:
+  - type: table
+    name: Overdue
+    filters:
+      and:
+        - 'date(contact.next_followup) < today()'
+    order: [file.name, contact.priority, contact.last_contacted, contact.next_followup, formula.last_contact_age]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Due Today
+    filters:
+      and:
+        - 'date(contact.next_followup) == today()'
+    order: [file.name, contact.priority, contact.last_contacted]
+    sort:
+      - property: contact.priority
+        direction: DESC
+  - type: table
+    name: Next 7 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today()'
+        - 'date(contact.next_followup) <= today() + "7 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Next 30 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today() + "7 days"'
+        - 'date(contact.next_followup) <= today() + "30 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: All Contacts
+    order: [file.name, contact.company, contact.priority, contact.relationship, contact.last_contacted, contact.next_followup, contact.followup_days]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: file.name
+        direction: ASC
+`;
+  }
+  /** Create/refresh the base file, then a thin dashboard note that embeds it. */
+  async createDashboardBases(dashPath) {
+    const basePath = this.settings.basePath || DEFAULT_SETTINGS.basePath;
+    try {
+      const existingBase = this.app.vault.getAbstractFileByPath(basePath);
+      if (existingBase instanceof import_obsidian.TFile) {
+        await this.app.vault.modify(existingBase, this.buildContactsBase());
+      } else {
+        const baseParent = basePath.split("/").slice(0, -1).join("/");
+        if (baseParent)
+          await ensureFolder(this.app, baseParent);
+        await this.app.vault.create(basePath, this.buildContactsBase());
+      }
+      const baseName = basePath.replace(/\.base$/, "");
+      const content = [
+        "# \u{1F4C7} Contact Dashboard",
+        "",
+        "> [!tip] Powered by Simple Contact Manager and Obsidian Bases.",
+        "> Tap a view tab (Overdue \xB7 Due Today \xB7 Next 7 Days \xB7 Next 30 Days \xB7 All)",
+        "> to switch. Auto-updates as contacts change.",
+        "",
+        `![[${baseName}.base]]`,
+        ""
+      ].join("\n");
+      const parentFolder = dashPath.split("/").slice(0, -1).join("/");
+      if (parentFolder)
+        await ensureFolder(this.app, parentFolder);
+      return await this.app.vault.create(dashPath, content);
+    } catch (e) {
+      new import_obsidian.Notice(
+        `Could not create Bases dashboard. Check the dashboard and base paths in plugin settings.`
       );
       return null;
     }

@@ -16,11 +16,19 @@ import {
 interface SimpleCMSettings {
   contactsFolder: string;
   dashboardPath: string;
+  /** Which engine generates the dashboard. "dataview" (default) keeps the
+   * Dataview tables; "bases" generates a reusable Contacts.base with saved
+   * views and embeds it. Reversible — flip back to "dataview" and re-open. */
+  dashboardEngine: "dataview" | "bases";
+  /** Path of the generated base file when dashboardEngine is "bases". */
+  basePath: string;
 }
 
 const DEFAULT_SETTINGS: SimpleCMSettings = {
   contactsFolder: "Contacts",
   dashboardPath: "Contact Dashboard.md",
+  dashboardEngine: "dataview",
+  basePath: "Contacts.base",
 };
 
 const PRIORITIES = ["high", "medium", "low"] as const;
@@ -294,6 +302,39 @@ class SimpleCMSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("Dashboard engine")
+      .setDesc(
+        "Dataview keeps the classic tables. Bases (beta) generates a reusable Contacts.base with saved views (Overdue, Due Today, Next 7/30 Days, All) and embeds it — lighter on mobile. After changing this, delete the dashboard note and re-open it to regenerate."
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOption("dataview", "Dataview (classic tables)")
+          .addOption("bases", "Bases (saved views, beta)")
+          .setValue(this.plugin.settings.dashboardEngine)
+          .onChange(async (value) => {
+            this.plugin.settings.dashboardEngine =
+              value === "bases" ? "bases" : "dataview";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Base file path")
+      .setDesc(
+        "Path of the generated base file, used when the engine is Bases."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.basePath)
+          .setValue(this.plugin.settings.basePath)
+          .onChange(async (value) => {
+            this.plugin.settings.basePath =
+              value.trim() || DEFAULT_SETTINGS.basePath;
+            await this.plugin.saveSettings();
+          })
+      );
+
     new Setting(containerEl).setName("Actions").setHeading();
 
     new Setting(containerEl)
@@ -547,6 +588,12 @@ export default class SimpleCMPlugin extends Plugin {
   }
 
   async createDashboard(dashPath: string): Promise<TFile | null> {
+    // Workstream B: a per-dashboard engine toggle. "bases" generates a reusable
+    // Contacts.base (saved views) and embeds it; "dataview" (default) keeps the
+    // original tables. Flip the setting and delete/reopen the note to switch.
+    if (this.settings.dashboardEngine === "bases") {
+      return this.createDashboardBases(dashPath);
+    }
     const folder = this.settings.contactsFolder;
     const content = [
       "# 📇 Contact Dashboard",
@@ -646,6 +693,124 @@ export default class SimpleCMPlugin extends Plugin {
     } catch (e) {
       new Notice(
         `Could not create dashboard at "${dashPath}". Check the path in plugin settings.`
+      );
+      return null;
+    }
+  }
+
+  // ── Bases dashboard (Workstream B) ───────────────────────────────────────
+
+  /** One reusable base with saved views, replacing the five near-duplicate
+   * Dataview tables. Nested contact.* keys are dot-accessible; date() forces
+   * date typing on the nested values. Kept in sync with Contacts.base. */
+  private buildContactsBase(): string {
+    return `filters:
+  and:
+    - file.hasTag("contact")
+    - 'note.is_template != true'
+formulas:
+  last_contact_age: 'today() - date(contact.last_contacted)'
+  due_in: 'date(contact.next_followup) - today()'
+properties:
+  file.name:
+    displayName: Contact
+  contact.priority:
+    displayName: Priority
+  contact.relationship:
+    displayName: Type
+  contact.company:
+    displayName: Company
+  contact.last_contacted:
+    displayName: Last Contacted
+  contact.next_followup:
+    displayName: Next Follow-up
+  contact.followup_days:
+    displayName: Cadence (days)
+  formula.last_contact_age:
+    displayName: Last Contact Age
+  formula.due_in:
+    displayName: In
+views:
+  - type: table
+    name: Overdue
+    filters:
+      and:
+        - 'date(contact.next_followup) < today()'
+    order: [file.name, contact.priority, contact.last_contacted, contact.next_followup, formula.last_contact_age]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Due Today
+    filters:
+      and:
+        - 'date(contact.next_followup) == today()'
+    order: [file.name, contact.priority, contact.last_contacted]
+    sort:
+      - property: contact.priority
+        direction: DESC
+  - type: table
+    name: Next 7 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today()'
+        - 'date(contact.next_followup) <= today() + "7 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Next 30 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today() + "7 days"'
+        - 'date(contact.next_followup) <= today() + "30 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: All Contacts
+    order: [file.name, contact.company, contact.priority, contact.relationship, contact.last_contacted, contact.next_followup, contact.followup_days]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: file.name
+        direction: ASC
+`;
+  }
+
+  /** Create/refresh the base file, then a thin dashboard note that embeds it. */
+  private async createDashboardBases(dashPath: string): Promise<TFile | null> {
+    const basePath = this.settings.basePath || DEFAULT_SETTINGS.basePath;
+    try {
+      const existingBase = this.app.vault.getAbstractFileByPath(basePath);
+      if (existingBase instanceof TFile) {
+        await this.app.vault.modify(existingBase, this.buildContactsBase());
+      } else {
+        const baseParent = basePath.split("/").slice(0, -1).join("/");
+        if (baseParent) await ensureFolder(this.app, baseParent);
+        await this.app.vault.create(basePath, this.buildContactsBase());
+      }
+      const baseName = basePath.replace(/\.base$/, "");
+      const content = [
+        "# 📇 Contact Dashboard",
+        "",
+        "> [!tip] Powered by Simple Contact Manager and Obsidian Bases.",
+        "> Tap a view tab (Overdue · Due Today · Next 7 Days · Next 30 Days · All)",
+        "> to switch. Auto-updates as contacts change.",
+        "",
+        `![[${baseName}.base]]`,
+        "",
+      ].join("\n");
+      const parentFolder = dashPath.split("/").slice(0, -1).join("/");
+      if (parentFolder) await ensureFolder(this.app, parentFolder);
+      return await this.app.vault.create(dashPath, content);
+    } catch (e) {
+      new Notice(
+        `Could not create Bases dashboard. Check the dashboard and base paths in plugin settings.`
       );
       return null;
     }
