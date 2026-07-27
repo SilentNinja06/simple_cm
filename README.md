@@ -1,3 +1,8 @@
+> [!note] Archived mirror — development moved to the monorepo
+> **simple-contact-manager** now lives in the [obsidian-workspace monorepo](https://github.com/SilentNinja06/obsidian_workspace.obs) at `plugins/contacts`, alongside the other plugins and the shared `@obsidian-workspace/*` packages. Please open issues and PRs there.
+>
+> This repository is kept as an **archived mirror** so existing BRAT installs keep resolving from its releases. New releases are cut from the monorepo.
+
 # Simple Contact Manager
 
 An Obsidian plugin that turns your vault into a lightweight contact relationship manager. Track who you need to reach out to, log interactions, and get an auto-updating dashboard showing overdue and upcoming follow-ups.
