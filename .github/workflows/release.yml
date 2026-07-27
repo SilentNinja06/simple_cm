@@ -1,71 +1,28 @@
-name: Release
-
-# A release is cut whenever the version in manifest.json has no tag yet:
-# on branch pushes (version bump = release), on manual runs, and on tag
-# pushes. Pushes whose manifest version is already released do nothing. Assets
-# are uploaded with --clobber so an existing release is repaired rather than
-# left empty. (No lockfile in this repo, so we use `npm install`.)
+name: Release plugin
 on:
   push:
-    tags:
-      - "*"
-    branches:
-      - "**"
+    paths:
+      - manifest.json
+      - main.js
   workflow_dispatch: {}
-
 permissions:
   contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Build plugin
-        run: |
-          npm install
-          npm run build
-
-      - name: Determine version
-        id: version
-        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Check whether this version is already tagged
-        id: state
+      - name: Publish release from manifest version
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
-            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          VERSION="$(jq -r .version manifest.json)"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then echo "no version in manifest"; exit 1; fi
+          ASSETS="main.js manifest.json"
+          [ -f styles.css ] && ASSETS="$ASSETS styles.css"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" $ASSETS --clobber
           else
-            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            gh release create "$VERSION" $ASSETS --title "$VERSION" \
+              --notes "BRAT distribution release $VERSION. Built from the obsidian_workspace.obs monorepo."
           fi
-
-      - name: Create tag
-        if: steps.state.outputs.tag_exists == 'false' && !startsWith(github.ref, 'refs/tags/')
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$VERSION"
-          git push origin "$VERSION"
-
-      - name: Create or update release
-        if: steps.state.outputs.tag_exists == 'false' || github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if ! gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release create "$VERSION" \
-              --target "$GITHUB_SHA" \
-              --title "$VERSION" \
-              --notes "Simple Contact Manager $VERSION — install via BRAT or copy main.js, manifest.json, and styles.css into .obsidian/plugins/simple-contact-manager/."
-          fi
-          gh release upload "$VERSION" main.js manifest.json styles.css --clobber

@@ -27,10 +27,193 @@ __export(main_exports, {
   default: () => SimpleCMPlugin
 });
 module.exports = __toCommonJS(main_exports);
+var import_obsidian3 = require("obsidian");
+
+// ../../packages/core/dist/frontmatter/schema.js
+var NOTE_TYPES = {
+  contact: {
+    id: "contact",
+    coreKeys: ["type", "status", "created", "updated", "tags"],
+    namespace: {
+      name: "contact",
+      subKeys: [
+        "company",
+        "priority",
+        "relationship",
+        "last_contacted",
+        "next_followup",
+        "followup_days"
+      ]
+    },
+    legacyFlatKeys: [
+      "company",
+      "priority",
+      "relationship",
+      "last_contacted",
+      "next_followup",
+      "followup_days"
+    ]
+  },
+  "food-entry": {
+    id: "food-entry",
+    coreKeys: ["type", "status", "created", "updated", "tags"],
+    namespace: {
+      name: "arfid",
+      subKeys: [
+        "meal",
+        "outcome",
+        "exposure",
+        "exposure_step",
+        "status_reason",
+        "texture_notes",
+        "context",
+        "strategy_used",
+        "strategy_worked"
+      ]
+    },
+    legacyFlatKeys: [
+      "meal",
+      "outcome",
+      "exposure",
+      "exposure_step",
+      "status_reason",
+      "texture_notes",
+      "context",
+      "strategy_used",
+      "strategy_worked"
+    ]
+  },
+  recipe: {
+    id: "recipe",
+    coreKeys: ["type", "status", "created", "updated", "tags"],
+    namespace: {
+      name: "recipe",
+      subKeys: ["category", "servings", "prep_time", "cook_time"]
+    },
+    // `type` used to hold the category (sauce/main/…); servings/prepTime/cookTime
+    // were bare. prepTime/cookTime are the camelCase legacy spellings.
+    legacyFlatKeys: ["servings", "prepTime", "cookTime"]
+  },
+  daily: {
+    id: "daily",
+    coreKeys: ["type", "created", "updated", "tags"],
+    legacyFlatKeys: []
+  }
+};
+function specForType(type) {
+  if (typeof type !== "string")
+    return void 0;
+  return NOTE_TYPES[type];
+}
+
+// ../../packages/core/dist/frontmatter/validate.js
+function isPlainObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function validateFrontmatter(fm) {
+  if (!fm)
+    return [];
+  const spec = specForType(fm.type);
+  if (!spec)
+    return [];
+  return validateAgainst(fm, spec);
+}
+function validateAgainst(fm, spec) {
+  const warnings = [];
+  for (const key of spec.coreKeys) {
+    if (!(key in fm)) {
+      warnings.push({
+        kind: "missing-core",
+        key,
+        message: `missing core key "${key}"`
+      });
+    }
+  }
+  if (spec.namespace) {
+    const ns = spec.namespace.name;
+    if (ns in fm && !isPlainObject(fm[ns])) {
+      warnings.push({
+        kind: "namespace-not-object",
+        key: ns,
+        message: `"${ns}" should be a nested object`
+      });
+    }
+    for (const legacy of spec.legacyFlatKeys) {
+      if (legacy in fm) {
+        warnings.push({
+          kind: "legacy-flat",
+          key: legacy,
+          message: `legacy flat key "${legacy}" should be nested under "${ns}" \u2014 run the frontmatter migration`
+        });
+      }
+    }
+  }
+  return warnings;
+}
+function collectWarnings(notes, typeFilter) {
+  var _a;
+  const out = [];
+  for (const n of notes) {
+    if (typeFilter && !typeFilter((_a = n.frontmatter) === null || _a === void 0 ? void 0 : _a.type))
+      continue;
+    const warnings = validateFrontmatter(n.frontmatter);
+    if (warnings.length > 0)
+      out.push({ id: n.id, warnings });
+  }
+  return out;
+}
+function logDrift(results, context, sample = 3, logger = console) {
+  if (results.length === 0)
+    return results;
+  for (const r of results.slice(0, sample)) {
+    logger.warn(`[${context}] ${r.id}: ${r.warnings.map((w) => w.message).join("; ")}`);
+  }
+  logger.warn(`[${context}] frontmatter drift on ${results.length} note(s) \u2014 run the migration (see docs/frontmatter-schema.md)`);
+  return results;
+}
+
+// ../../packages/ui/dist/constants.js
+var CLS = "mrd";
+function cls(...parts) {
+  return [CLS, ...parts].join("-");
+}
+
+// ../../packages/ui/dist/modal.js
 var import_obsidian = require("obsidian");
+
+// ../../packages/ui/dist/toast.js
+var import_obsidian2 = require("obsidian");
+
+// ../../packages/ui/dist/css.generated.js
+var UI_CSS = "/* Workstream F (\xA77) \u2014 token layer. All color derives from Obsidian theme vars;\n * no hardcoded palette. Scoped to .mrd-scope so a plugin opts in by adding that\n * class to its root; nothing leaks into the rest of the app. */\n\n.mrd-scope {\n  /* color \u2014 semantic aliases over Obsidian vars */\n  --mrd-bg: var(--background-primary);\n  --mrd-bg-alt: var(--background-secondary);\n  --mrd-text: var(--text-normal);\n  --mrd-muted: var(--text-muted);\n  --mrd-faint: var(--text-faint);\n  --mrd-accent: var(--interactive-accent);\n  --mrd-accent-text: var(--text-on-accent);\n  --mrd-border: var(--background-modifier-border);\n  --mrd-hover: var(--background-modifier-hover);\n  --mrd-error: var(--text-error);\n  /* the accent skin repoints these two; default leaves them theme-neutral */\n  --mrd-rule: var(--mrd-border);\n  --mrd-label-color: var(--mrd-muted);\n\n  /* spacing \u2014 4px grid */\n  --mrd-space-1: 4px;\n  --mrd-space-2: 8px;\n  --mrd-space-3: 12px;\n  --mrd-space-4: 16px;\n  --mrd-space-5: 24px;\n  --mrd-space-6: 32px;\n\n  /* radius / hairline */\n  --mrd-radius-sm: 3px;\n  --mrd-radius-md: 5px;\n  --mrd-radius-lg: 8px;\n  --mrd-rule-width: 1px;\n\n  /* rows / density \u2014 comfortable by default; 44pt floor on mobile */\n  --mrd-row-comfortable: 40px;\n  --mrd-row-compact: 30px;\n  --mrd-touch-min: 44px;\n  --mrd-row-height: var(--mrd-row-comfortable);\n\n  /* type scale */\n  --mrd-fs-xs: 11px;\n  --mrd-fs-sm: 12px;\n  --mrd-fs-base: 14px;\n  --mrd-fs-lg: 16px;\n  --mrd-fs-xl: 20px;\n  --mrd-lh-tight: 1.2;\n  --mrd-lh-base: 1.5;\n\n  /* the utility register (mono), reused everywhere labels appear */\n  --mrd-label: var(--font-monospace);\n  --mrd-tracking: 0.08em;\n}\n\n/* density toggle (desktop) */\n.mrd-scope.mrd-density-compact {\n  --mrd-row-height: var(--mrd-row-compact);\n}\n\n/* mobile: never let a row/target fall below 44pt, whatever the density */\n.is-mobile .mrd-scope {\n  --mrd-row-height: max(var(--mrd-row-comfortable), var(--mrd-touch-min));\n}\n.is-mobile .mrd-scope.mrd-density-compact {\n  --mrd-row-height: max(var(--mrd-row-compact), var(--mrd-touch-min));\n}\n\n/* optional accent skin \u2014 OFF by default; a plugin adds .mrd-skin-accent to opt in */\n.mrd-scope.mrd-skin-accent {\n  --mrd-rule: color-mix(in srgb, var(--mrd-accent) 35%, var(--mrd-border));\n  --mrd-label-color: color-mix(in srgb, var(--mrd-accent) 55%, var(--mrd-muted));\n}\n\n/* Workstream F (\xA77) \u2014 component + scope styles. Everything is scoped to\n * .mrd-scope and uses the tokens; a plugin adopts the language by adding\n * .mrd-scope to its view/modal root. No hardcoded colors. */\n\n/* ---- the utility register --------------------------------------------- */\n.mrd-scope .mrd-label,\n.mrd-scope .mrd-status-label {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-xs);\n  text-transform: uppercase;\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-label-color);\n  line-height: var(--mrd-lh-tight);\n}\n\n/* Section headers also join the register (gate decision): mono, uppercase,\n * tracked. Covers our own headings and Obsidian setting-tab headings within\n * scope. */\n.mrd-scope h2,\n.mrd-scope h3,\n.mrd-scope .mrd-settings-heading,\n.mrd-scope .setting-item-heading .setting-item-name {\n  font-family: var(--mrd-label);\n  text-transform: uppercase;\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-text);\n}\n.mrd-scope h2 { font-size: var(--mrd-fs-lg); }\n.mrd-scope h3,\n.mrd-scope .mrd-settings-heading,\n.mrd-scope .setting-item-heading .setting-item-name { font-size: var(--mrd-fs-sm); }\n\n/* ---- status strip (signature element) --------------------------------- */\n.mrd-scope .mrd-status-strip {\n  display: flex;\n  gap: var(--mrd-space-4);\n  align-items: center;\n  min-height: var(--mrd-row-compact);\n  padding: var(--mrd-space-1) var(--mrd-space-3);\n  border-bottom: var(--mrd-rule-width) solid var(--mrd-rule);\n  overflow-x: auto;\n  white-space: nowrap;\n  scrollbar-width: none;\n}\n.mrd-scope .mrd-status-strip::-webkit-scrollbar { display: none; }\n.mrd-scope .mrd-status-cell {\n  display: inline-flex;\n  gap: var(--mrd-space-1);\n  align-items: baseline;\n}\n.mrd-scope .mrd-status-value {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-sm);\n  color: var(--mrd-text);\n}\n\n/* ---- list row --------------------------------------------------------- */\n.mrd-scope .mrd-row {\n  display: flex;\n  align-items: center;\n  gap: var(--mrd-space-3);\n  min-height: var(--mrd-row-height);\n  padding: 0 var(--mrd-space-3);\n  border-bottom: var(--mrd-rule-width) solid var(--mrd-border);\n  position: relative;\n}\n.mrd-scope .mrd-row-main { flex: 1; min-width: 0; }\n.mrd-scope .mrd-row-title {\n  font-size: var(--mrd-fs-lg);\n  color: var(--mrd-text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.mrd-scope .mrd-row-meta {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-xs);\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-muted);\n}\n.mrd-scope .mrd-row-badge {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-xs);\n  text-transform: uppercase;\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-muted);\n  border: var(--mrd-rule-width) solid var(--mrd-border);\n  border-radius: var(--mrd-radius-sm);\n  padding: 0 var(--mrd-space-1);\n}\n/* desktop hover only \u2014 no hover-only *affordances*, this is decoration */\n@media (hover: hover) {\n  .mrd-scope .mrd-row:hover { background: var(--mrd-hover); }\n}\n/* swipe-to-action: trailing action revealed by swipe on touch; always tappable */\n.mrd-scope .mrd-row-action {\n  flex: 0 0 auto;\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-xs);\n  text-transform: uppercase;\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-accent);\n  background: transparent;\n  border: none;\n  min-height: var(--mrd-touch-min);\n  padding: 0 var(--mrd-space-3);\n  cursor: pointer;\n}\n\n/* ---- empty state ------------------------------------------------------ */\n.mrd-scope .mrd-empty {\n  display: grid;\n  place-items: center;\n  min-height: calc(var(--mrd-row-height) * 3);\n  padding: var(--mrd-space-5);\n}\n.mrd-scope .mrd-empty-text {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-sm);\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-muted);\n  text-align: center;\n}\n\n/* ---- inputs ----------------------------------------------------------- */\n.mrd-scope .mrd-field { display: flex; flex-direction: column; gap: var(--mrd-space-1); margin-bottom: var(--mrd-space-3); }\n.mrd-scope .mrd-field-label {\n  font-family: var(--mrd-label);\n  font-size: var(--mrd-fs-xs);\n  text-transform: uppercase;\n  letter-spacing: var(--mrd-tracking);\n  color: var(--mrd-label-color);\n}\n.mrd-scope .mrd-field-date,\n.mrd-scope .mrd-field-quantity {\n  min-height: var(--mrd-touch-min);\n  border-radius: var(--mrd-radius-sm);\n  border: var(--mrd-rule-width) solid var(--mrd-border);\n  background: var(--mrd-bg);\n  color: var(--mrd-text);\n  padding: 0 var(--mrd-space-2);\n}\n\n/* ---- bottom sheet (mobile) / modal (desktop) -------------------------- */\n.mrd-sheet.mrd-sheet-body { padding: var(--mrd-space-4); }\n.is-mobile .mrd-sheet.mrd-sheet-mobile {\n  position: fixed;\n  left: 0; right: 0; bottom: 0;\n  top: auto;\n  width: 100%;\n  max-width: 100%;\n  margin: 0;\n  border-radius: var(--mrd-radius-lg) var(--mrd-radius-lg) 0 0;\n  animation: mrd-sheet-up 180ms ease-out;\n}\n/* safe area on anything bottom-anchored */\n.is-mobile .mrd-sheet.mrd-safe-bottom {\n  padding-bottom: max(var(--mrd-space-4), env(safe-area-inset-bottom));\n}\n@keyframes mrd-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }\n\n/* ---- focus ring (survives theme changes; visible light + dark) -------- */\n.mrd-scope :focus-visible {\n  outline: 2px solid var(--mrd-accent);\n  outline-offset: 2px;\n  border-radius: var(--mrd-radius-sm);\n}\n\n/* ---- quality floor ---------------------------------------------------- */\n@media (prefers-reduced-motion: reduce) {\n  .is-mobile .mrd-sheet.mrd-sheet-mobile { animation: none; }\n  .mrd-scope * { transition: none !important; }\n}\n";
+
+// ../../packages/ui/dist/styles.js
+function applyUiStyles(plugin) {
+  const id = `mrd-ui-styles-${plugin.manifest.id}`;
+  if (document.getElementById(id))
+    return;
+  const el = document.createElement("style");
+  el.id = id;
+  el.textContent = UI_CSS;
+  document.head.appendChild(el);
+  plugin.register(() => el.remove());
+}
+function scopeEl(el, opts = {}) {
+  el.classList.add(cls("scope"));
+  if (opts.density === "compact")
+    el.classList.add(cls("density", "compact"));
+  if (opts.accentSkin)
+    el.classList.add(cls("skin", "accent"));
+}
+
+// main.ts
 var DEFAULT_SETTINGS = {
   contactsFolder: "Contacts",
   dashboardPath: "Contact Dashboard.md",
+  // Bases is the default now that the mobile gate has passed; flip back to
+  // "dataview" any time via the Dashboard engine setting.
+  dashboardEngine: "bases",
+  basePath: "Contacts.base",
   dailyNoteLinking: true,
   createDailyNoteIfMissing: true,
   dailyNoteMarker: "%% crm-log %%",
@@ -53,10 +236,10 @@ var RELATIONSHIPS = [
 ];
 var CADENCE_DAYS = [7, 14, 30, 60, 90];
 function today() {
-  return (0, import_obsidian.moment)().format("YYYY-MM-DD");
+  return (0, import_obsidian3.moment)().format("YYYY-MM-DD");
 }
 function addDays(days) {
-  return (0, import_obsidian.moment)().add(days, "days").format("YYYY-MM-DD");
+  return (0, import_obsidian3.moment)().add(days, "days").format("YYYY-MM-DD");
 }
 function sanitizeFileName(name) {
   return name.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim();
@@ -74,26 +257,23 @@ function getDailyNotesOptions(app) {
 var CRM_LOG_LINE = /^- \d{2}:\d{2} \[\[/;
 async function linkInteractionIntoDailyNote(app, settings, contactName, descriptor) {
   var _a;
-  if (!settings.dailyNoteLinking)
-    return;
+  if (!settings.dailyNoteLinking) return;
   try {
     const opts = getDailyNotesOptions(app);
     const format = opts.format || "YYYY-MM-DD";
     const folder = ((_a = opts.folder) != null ? _a : "").trim().replace(/\/+$/, "");
-    const date = (0, import_obsidian.moment)().format("YYYY-MM-DD");
-    const time = (0, import_obsidian.moment)().format("HH:mm");
-    const dailyName = (0, import_obsidian.moment)(date, "YYYY-MM-DD").format(format);
-    const path = (0, import_obsidian.normalizePath)((folder ? folder + "/" : "") + dailyName + ".md");
+    const date = (0, import_obsidian3.moment)().format("YYYY-MM-DD");
+    const time = (0, import_obsidian3.moment)().format("HH:mm");
+    const dailyName = (0, import_obsidian3.moment)(date, "YYYY-MM-DD").format(format);
+    const path = (0, import_obsidian3.normalizePath)((folder ? folder + "/" : "") + dailyName + ".md");
     let file = app.vault.getAbstractFileByPath(path);
     if (!file) {
-      if (!settings.createDailyNoteIfMissing)
-        return;
+      if (!settings.createDailyNoteIfMissing) return;
       await ensureParentFolder(app, path);
       const body = await renderDailyTemplate(app, opts, path, date);
       file = await app.vault.create(path, body);
     }
-    if (!(file instanceof import_obsidian.TFile))
-      return;
+    if (!(file instanceof import_obsidian3.TFile)) return;
     const line = `- ${time} [[${contactName}|${contactName}]] \u2014 ${descriptor}`;
     await app.vault.process(
       file,
@@ -105,38 +285,32 @@ async function linkInteractionIntoDailyNote(app, settings, contactName, descript
 }
 async function ensureParentFolder(app, path) {
   const dir = path.split("/").slice(0, -1).join("/");
-  if (!dir)
-    return;
-  if (app.vault.getAbstractFileByPath(dir) instanceof import_obsidian.TFolder)
-    return;
+  if (!dir) return;
+  if (app.vault.getAbstractFileByPath(dir) instanceof import_obsidian3.TFolder) return;
   await app.vault.createFolder(dir).catch(() => {
   });
 }
 async function renderDailyTemplate(app, opts, dailyPath, date) {
   var _a, _b, _c;
   const templateSetting = ((_a = opts.template) != null ? _a : "").trim();
-  if (!templateSetting)
-    return "";
-  const templatePath = (0, import_obsidian.normalizePath)(
+  if (!templateSetting) return "";
+  const templatePath = (0, import_obsidian3.normalizePath)(
     templateSetting.endsWith(".md") ? templateSetting : templateSetting + ".md"
   );
   const tFile = app.vault.getAbstractFileByPath(templatePath);
-  if (!(tFile instanceof import_obsidian.TFile))
-    return "";
+  if (!(tFile instanceof import_obsidian3.TFile)) return "";
   const raw = await app.vault.cachedRead(tFile);
   const basename = (_c = (_b = dailyPath.split("/").pop()) == null ? void 0 : _b.replace(/\.md$/, "")) != null ? _c : "";
-  const m = (0, import_obsidian.moment)(date, "YYYY-MM-DD");
-  const now = (0, import_obsidian.moment)();
+  const m = (0, import_obsidian3.moment)(date, "YYYY-MM-DD");
+  const now = (0, import_obsidian3.moment)();
   return raw.replace(/{{\s*title\s*}}/gi, basename).replace(/{{\s*date(?::([^}]+))?\s*}}/gi, (_, fmt) => m.format(fmt || "YYYY-MM-DD")).replace(/{{\s*time(?::([^}]+))?\s*}}/gi, (_, fmt) => now.format(fmt || "HH:mm"));
 }
 function insertCrmLogLine(content, line, settings, time) {
   const lines = content.split("\n");
-  if (lines.some((l) => l.trim() === line.trim()))
-    return content;
+  if (lines.some((l) => l.trim() === line.trim())) return content;
   const marker = settings.dailyNoteMarker.trim();
   let anchor = -1;
-  if (marker)
-    anchor = lines.findIndex((l) => l.includes(marker));
+  if (marker) anchor = lines.findIndex((l) => l.includes(marker));
   if (anchor === -1) {
     const heading = settings.dailyNoteHeading.trim().toLowerCase().replace(/:$/, "");
     if (heading) {
@@ -156,14 +330,13 @@ ${line}
   let insertAt = anchor + 1;
   while (insertAt < lines.length && CRM_LOG_LINE.test(lines[insertAt])) {
     const existingTime = lines[insertAt].slice(2, 7);
-    if (existingTime > time)
-      break;
+    if (existingTime > time) break;
     insertAt++;
   }
   lines.splice(insertAt, 0, line);
   return lines.join("\n");
 }
-var NewContactModal = class extends import_obsidian.Modal {
+var NewContactModal = class extends import_obsidian3.Modal {
   constructor(app, onSubmit) {
     super(app);
     this.data = {
@@ -180,38 +353,38 @@ var NewContactModal = class extends import_obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     this.titleEl.setText("New contact");
-    new import_obsidian.Setting(contentEl).setName("Full name").addText((text) => {
+    new import_obsidian3.Setting(contentEl).setName("Full name").addText((text) => {
       text.setPlaceholder("Jane Smith").onChange((v) => this.data.name = v);
       text.inputEl.focus();
     });
-    new import_obsidian.Setting(contentEl).setName("Email").addText(
+    new import_obsidian3.Setting(contentEl).setName("Email").addText(
       (text) => text.setPlaceholder("jane@example.com").onChange((v) => this.data.email = v.trim())
     );
-    new import_obsidian.Setting(contentEl).setName("Phone").addText(
+    new import_obsidian3.Setting(contentEl).setName("Phone").addText(
       (text) => text.setPlaceholder("555-1234").onChange((v) => this.data.phone = v.trim())
     );
-    new import_obsidian.Setting(contentEl).setName("Company").addText(
+    new import_obsidian3.Setting(contentEl).setName("Company").addText(
       (text) => text.setPlaceholder("Acme Corp").onChange((v) => this.data.company = v.trim())
     );
-    new import_obsidian.Setting(contentEl).setName("Priority").addDropdown((dd) => {
+    new import_obsidian3.Setting(contentEl).setName("Priority").addDropdown((dd) => {
       PRIORITIES.forEach((p) => dd.addOption(p, PRIORITY_LABELS[p]));
       dd.setValue(this.data.priority).onChange(
         (v) => this.data.priority = v
       );
     });
-    new import_obsidian.Setting(contentEl).setName("Relationship").addDropdown((dd) => {
+    new import_obsidian3.Setting(contentEl).setName("Relationship").addDropdown((dd) => {
       RELATIONSHIPS.forEach((r) => dd.addOption(r, r));
       dd.setValue(this.data.relationship).onChange(
         (v) => this.data.relationship = v
       );
     });
-    new import_obsidian.Setting(contentEl).setName("Follow-up cadence").addDropdown((dd) => {
+    new import_obsidian3.Setting(contentEl).setName("Follow-up cadence").addDropdown((dd) => {
       CADENCE_DAYS.forEach((d) => dd.addOption(String(d), `Every ${d} days`));
       dd.setValue(String(this.data.followupDays)).onChange(
         (v) => this.data.followupDays = Number(v)
       );
     });
-    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
+    new import_obsidian3.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
       (btn) => btn.setButtonText("Create contact").setCta().onClick(() => this.submit())
     );
     contentEl.addEventListener("keydown", (e) => {
@@ -224,7 +397,7 @@ var NewContactModal = class extends import_obsidian.Modal {
   submit() {
     this.data.name = this.data.name.trim();
     if (!this.data.name) {
-      new import_obsidian.Notice("Name is required.");
+      new import_obsidian3.Notice("Name is required.");
       return;
     }
     this.onSubmit(this.data);
@@ -234,7 +407,7 @@ var NewContactModal = class extends import_obsidian.Modal {
     this.contentEl.empty();
   }
 };
-var ContactSuggestModal = class extends import_obsidian.FuzzySuggestModal {
+var ContactSuggestModal = class extends import_obsidian3.FuzzySuggestModal {
   constructor(app, contacts, onChoose) {
     super(app);
     this.contacts = contacts;
@@ -251,7 +424,7 @@ var ContactSuggestModal = class extends import_obsidian.FuzzySuggestModal {
     this.onChoose(file);
   }
 };
-var InteractionNoteModal = class extends import_obsidian.Modal {
+var InteractionNoteModal = class extends import_obsidian3.Modal {
   constructor(app, contact, onSubmit) {
     super(app);
     this.note = "";
@@ -261,7 +434,7 @@ var InteractionNoteModal = class extends import_obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     this.titleEl.setText(`Log interaction \u2014 ${this.contact.basename}`);
-    new import_obsidian.Setting(contentEl).setName("Interaction note").addText((text) => {
+    new import_obsidian3.Setting(contentEl).setName("Interaction note").addText((text) => {
       text.setPlaceholder("e.g. Called re: contract renewal").onChange((v) => this.note = v);
       text.inputEl.focus();
       text.inputEl.addEventListener("keydown", (e) => {
@@ -271,14 +444,14 @@ var InteractionNoteModal = class extends import_obsidian.Modal {
         }
       });
     });
-    new import_obsidian.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
+    new import_obsidian3.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
       (btn) => btn.setButtonText("Log interaction").setCta().onClick(() => this.submit())
     );
   }
   submit() {
     const note = this.note.trim();
     if (!note) {
-      new import_obsidian.Notice("Please enter an interaction note.");
+      new import_obsidian3.Notice("Please enter an interaction note.");
       return;
     }
     this.onSubmit(note);
@@ -288,7 +461,7 @@ var InteractionNoteModal = class extends import_obsidian.Modal {
     this.contentEl.empty();
   }
 };
-var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
+var SimpleCMSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -297,7 +470,8 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
     var _a, _b;
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Contacts folder").setDesc(
+    scopeEl(containerEl);
+    new import_obsidian3.Setting(containerEl).setName("Contacts folder").setDesc(
       "Folder where new contact notes are created and where the dashboard looks for contacts. If you change this after creating the dashboard, delete the dashboard note and reopen it to regenerate its queries."
     ).addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.contactsFolder).setValue(this.plugin.settings.contactsFolder).onChange(async (value) => {
@@ -305,7 +479,7 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Dashboard note path").setDesc(
+    new import_obsidian3.Setting(containerEl).setName("Dashboard note path").setDesc(
       "Path to your Contact Dashboard note, relative to the vault root."
     ).addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.dashboardPath).setValue(this.plugin.settings.dashboardPath).onChange(async (value) => {
@@ -313,8 +487,24 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Daily note").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Log interactions into the daily note").setDesc(
+    new import_obsidian3.Setting(containerEl).setName("Dashboard engine").setDesc(
+      "Dataview keeps the classic tables. Bases (beta) generates a reusable Contacts.base with saved views (Overdue, Due Today, Next 7/30 Days, All) and embeds it \u2014 lighter on mobile. After changing this, delete the dashboard note and re-open it to regenerate."
+    ).addDropdown(
+      (dd) => dd.addOption("dataview", "Dataview (classic tables)").addOption("bases", "Bases (saved views, beta)").setValue(this.plugin.settings.dashboardEngine).onChange(async (value) => {
+        this.plugin.settings.dashboardEngine = value === "bases" ? "bases" : "dataview";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Base file path").setDesc(
+      "Path of the generated base file, used when the engine is Bases."
+    ).addText(
+      (text) => text.setPlaceholder(DEFAULT_SETTINGS.basePath).setValue(this.plugin.settings.basePath).onChange(async (value) => {
+        this.plugin.settings.basePath = value.trim() || DEFAULT_SETTINGS.basePath;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Daily note").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Log interactions into the daily note").setDesc(
       "When you log an interaction, also write a line into that day's daily note under the marker/heading below."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.dailyNoteLinking).onChange(async (v) => {
@@ -322,13 +512,13 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Create the daily note if missing").setDesc("Seed a new daily note from the Daily Notes core template when one doesn't exist yet.").addToggle(
+    new import_obsidian3.Setting(containerEl).setName("Create the daily note if missing").setDesc("Seed a new daily note from the Daily Notes core template when one doesn't exist yet.").addToggle(
       (t) => t.setValue(this.plugin.settings.createDailyNoteIfMissing).onChange(async (v) => {
         this.plugin.settings.createDailyNoteIfMissing = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Placement marker").setDesc(
+    new import_obsidian3.Setting(containerEl).setName("Placement marker").setDesc(
       "Interactions are inserted after this marker if the daily note contains it (invisible in reading view)."
     ).addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.dailyNoteMarker).setValue(this.plugin.settings.dailyNoteMarker).onChange(async (value) => {
@@ -336,27 +526,27 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Fallback heading").setDesc("If the marker isn't found, interactions go under this heading; a heading is appended only as a last resort.").addText(
+    new import_obsidian3.Setting(containerEl).setName("Fallback heading").setDesc("If the marker isn't found, interactions go under this heading; a heading is appended only as a last resort.").addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.dailyNoteHeading).setValue(this.plugin.settings.dailyNoteHeading).onChange(async (value) => {
         this.plugin.settings.dailyNoteHeading = value.trim() || DEFAULT_SETTINGS.dailyNoteHeading;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Actions").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Open contact dashboard").setDesc("Open the dashboard note in the current pane.").addButton(
+    new import_obsidian3.Setting(containerEl).setName("Actions").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Open contact dashboard").setDesc("Open the dashboard note in the current pane.").addButton(
       (btn) => btn.setButtonText("Open dashboard").onClick(async () => {
         await this.plugin.openDashboard();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Restore default paths").setDesc("Reset all folder paths back to the defaults.").addButton(
+    new import_obsidian3.Setting(containerEl).setName("Restore default paths").setDesc("Reset all folder paths back to the defaults.").addButton(
       (btn) => btn.setButtonText("Restore defaults").setWarning().onClick(async () => {
         this.plugin.settings = { ...DEFAULT_SETTINGS };
         await this.plugin.saveSettings();
         this.display();
-        new import_obsidian.Notice("Paths restored to defaults.");
+        new import_obsidian3.Notice("Paths restored to defaults.");
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Dependency status").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Dependency status").setHeading();
     const dvInstalled = (_b = (_a = this.app.plugins) == null ? void 0 : _a.enabledPlugins) == null ? void 0 : _b.has(
       "dataview"
     );
@@ -373,7 +563,7 @@ var SimpleCMSettingTab = class extends import_obsidian.PluginSettingTab {
     }
   }
 };
-var SimpleCMPlugin = class extends import_obsidian.Plugin {
+var SimpleCMPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     /**
@@ -391,12 +581,12 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
       logInteraction: (pathOrName) => {
         var _a;
         let file = this.app.vault.getAbstractFileByPath(pathOrName);
-        if (!(file instanceof import_obsidian.TFile)) {
+        if (!(file instanceof import_obsidian3.TFile)) {
           file = (_a = this.getContactFiles().find(
             (f) => f.path === pathOrName || f.basename === pathOrName
           )) != null ? _a : null;
         }
-        if (file instanceof import_obsidian.TFile) {
+        if (file instanceof import_obsidian3.TFile) {
           this.logInteractionForFile(file);
           return true;
         }
@@ -424,7 +614,7 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
         name: String((_e = fm.name) != null ? _e : file.basename),
         path: file.path,
         priority,
-        daysSince: last ? (0, import_obsidian.moment)(todayStr).diff((0, import_obsidian.moment)(last, "YYYY-MM-DD"), "days") : null,
+        daysSince: last ? (0, import_obsidian3.moment)(todayStr).diff((0, import_obsidian3.moment)(last, "YYYY-MM-DD"), "days") : null,
         nextFollowup: next,
         overdue: !!next && next < todayStr,
         dueToday: !!next && next === todayStr
@@ -439,6 +629,17 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    applyUiStyles(this);
+    this.app.workspace.onLayoutReady(() => {
+      const notes = this.app.vault.getMarkdownFiles().map((f) => {
+        var _a;
+        return {
+          id: f.path,
+          frontmatter: (_a = this.app.metadataCache.getFileCache(f)) == null ? void 0 : _a.frontmatter
+        };
+      });
+      logDrift(collectWarnings(notes, (t) => t === "contact"), "simple-contact-manager");
+    });
     this.addSettingTab(new SimpleCMSettingTab(this.app, this));
     this.addCommand({
       id: "new-contact",
@@ -478,8 +679,8 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     const fileName = sanitizeFileName(data.name);
     const filePath = `${folderPath}/${fileName}.md`;
     const existing = this.app.vault.getAbstractFileByPath(filePath);
-    if (existing instanceof import_obsidian.TFile) {
-      new import_obsidian.Notice(`\u26A0\uFE0F A contact named "${fileName}" already exists.`);
+    if (existing instanceof import_obsidian3.TFile) {
+      new import_obsidian3.Notice(`\u26A0\uFE0F A contact named "${fileName}" already exists.`);
       await this.app.workspace.getLeaf().openFile(existing);
       return;
     }
@@ -503,20 +704,25 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     ].join("\n");
     const newFile = await this.app.vault.create(filePath, body);
     await this.app.fileManager.processFrontMatter(newFile, (fm) => {
+      fm.type = "contact";
+      fm.status = "active";
       fm.name = data.name;
       fm.email = data.email;
       fm.phone = data.phone;
-      fm.company = data.company;
       fm.tags = ["contact"];
-      fm.priority = data.priority;
-      fm.relationship = data.relationship;
-      fm.last_contacted = todayStr;
-      fm.followup_days = data.followupDays;
-      fm.next_followup = nextFollowup;
       fm.created = todayStr;
+      fm.updated = todayStr;
+      fm.contact = {
+        company: data.company,
+        priority: data.priority,
+        relationship: data.relationship,
+        last_contacted: todayStr,
+        followup_days: data.followupDays,
+        next_followup: nextFollowup
+      };
     });
     await this.app.workspace.getLeaf().openFile(newFile);
-    new import_obsidian.Notice(
+    new import_obsidian3.Notice(
       `\u2705 Created contact: ${data.name} \u2014 next follow-up in ${data.followupDays} days (${nextFollowup})`
     );
   }
@@ -524,7 +730,7 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
   logInteraction() {
     const contactFiles = this.getContactFiles();
     if (contactFiles.length === 0) {
-      new import_obsidian.Notice(
+      new import_obsidian3.Notice(
         "No contacts found. Create a contact first using the 'New contact' command."
       );
       return;
@@ -536,14 +742,27 @@ var SimpleCMPlugin = class extends import_obsidian.Plugin {
     }).open();
   }
   async writeInteractionLog(file, noteText) {
-    var _a, _b;
+    var _a, _b, _c, _d;
     const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
-    const followupDays = Number(fm == null ? void 0 : fm.followup_days) || 30;
+    const followupDays = Number((_c = (_b = fm == null ? void 0 : fm.contact) == null ? void 0 : _b.followup_days) != null ? _c : fm == null ? void 0 : fm.followup_days) || 30;
     const todayStr = today();
     const nextFollowup = addDays(followupDays);
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter.last_contacted = todayStr;
-      frontmatter.next_followup = nextFollowup;
+      const contact = frontmatter.contact && typeof frontmatter.contact === "object" ? frontmatter.contact : frontmatter.contact = {};
+      contact.last_contacted = todayStr;
+      contact.next_followup = nextFollowup;
+      frontmatter.updated = todayStr;
+      for (const k of [
+        "last_contacted",
+        "next_followup",
+        "followup_days",
+        "priority",
+        "relationship",
+        "company"
+      ]) {
+        if (k in frontmatter && !(k in contact)) contact[k] = frontmatter[k];
+        delete frontmatter[k];
+      }
     });
     await this.app.vault.process(file, (content) => {
       const logHeading = /^## Interaction Log$/m;
@@ -574,9 +793,9 @@ ${todayHeading}
 `
       );
     });
-    const contactName = String((_b = fm == null ? void 0 : fm.name) != null ? _b : file.basename);
+    const contactName = String((_d = fm == null ? void 0 : fm.name) != null ? _d : file.basename);
     await linkInteractionIntoDailyNote(this.app, this.settings, contactName, noteText);
-    new import_obsidian.Notice(
+    new import_obsidian3.Notice(
       `\u2705 Logged interaction for ${file.basename} \u2014 next follow-up: ${nextFollowup}`
     );
   }
@@ -584,14 +803,16 @@ ${todayHeading}
   async openDashboard() {
     const dashPath = this.settings.dashboardPath;
     let file = this.app.vault.getAbstractFileByPath(dashPath);
-    if (!(file instanceof import_obsidian.TFile)) {
+    if (!(file instanceof import_obsidian3.TFile)) {
       file = await this.createDashboard(dashPath);
-      if (!file)
-        return;
+      if (!file) return;
     }
     await this.app.workspace.getLeaf().openFile(file);
   }
   async createDashboard(dashPath) {
+    if (this.settings.dashboardEngine === "bases") {
+      return this.createDashboardBases(dashPath);
+    }
     const folder = this.settings.contactsFolder;
     const content = [
       "# \u{1F4C7} Contact Dashboard",
@@ -607,12 +828,12 @@ ${todayHeading}
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  last_contacted AS "Last Contacted",',
-      '  next_followup AS "Was Due"',
+      '  contact.priority AS "Priority",',
+      '  contact.last_contacted AS "Last Contacted",',
+      '  contact.next_followup AS "Was Due"',
       `FROM "${folder}"`,
-      "WHERE next_followup < date(today) AND is_template != true",
-      "SORT priority DESC, next_followup ASC",
+      "WHERE contact.next_followup < date(today) AND is_template != true",
+      "SORT contact.priority DESC, contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -623,11 +844,11 @@ ${todayHeading}
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  last_contacted AS "Last Contacted"',
+      '  contact.priority AS "Priority",',
+      '  contact.last_contacted AS "Last Contacted"',
       `FROM "${folder}"`,
-      "WHERE next_followup = date(today) AND is_template != true",
-      "SORT priority DESC",
+      "WHERE contact.next_followup = date(today) AND is_template != true",
+      "SORT contact.priority DESC",
       "```",
       "",
       "---",
@@ -638,12 +859,12 @@ ${todayHeading}
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  next_followup AS "Follow-up Date",',
-      '  (next_followup - date(today)).days + " days" AS "In"',
+      '  contact.priority AS "Priority",',
+      '  contact.next_followup AS "Follow-up Date",',
+      '  (contact.next_followup - date(today)).days + " days" AS "In"',
       `FROM "${folder}"`,
-      "WHERE next_followup > date(today) AND next_followup <= date(today) + dur(7 days) AND is_template != true",
-      "SORT next_followup ASC",
+      "WHERE contact.next_followup > date(today) AND contact.next_followup <= date(today) + dur(7 days) AND is_template != true",
+      "SORT contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -654,12 +875,12 @@ ${todayHeading}
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Contact",`,
       '  email AS "Email",',
-      '  priority AS "Priority",',
-      '  next_followup AS "Follow-up Date",',
-      '  (next_followup - date(today)).days + " days" AS "In"',
+      '  contact.priority AS "Priority",',
+      '  contact.next_followup AS "Follow-up Date",',
+      '  (contact.next_followup - date(today)).days + " days" AS "In"',
       `FROM "${folder}"`,
-      "WHERE next_followup > date(today) + dur(7 days) AND next_followup <= date(today) + dur(30 days) AND is_template != true",
-      "SORT next_followup ASC",
+      "WHERE contact.next_followup > date(today) + dur(7 days) AND contact.next_followup <= date(today) + dur(30 days) AND is_template != true",
+      "SORT contact.next_followup ASC",
       "```",
       "",
       "---",
@@ -670,15 +891,15 @@ ${todayHeading}
       "TABLE WITHOUT ID",
       `  ("[[" + file.name + "|" + name + "]]") AS "Name",`,
       '  email AS "Email",',
-      '  company AS "Company",',
-      '  priority AS "Priority",',
-      '  relationship AS "Type",',
-      '  last_contacted AS "Last Contacted",',
-      '  next_followup AS "Next Follow-up",',
-      '  followup_days AS "Cadence (days)"',
+      '  contact.company AS "Company",',
+      '  contact.priority AS "Priority",',
+      '  contact.relationship AS "Type",',
+      '  contact.last_contacted AS "Last Contacted",',
+      '  contact.next_followup AS "Next Follow-up",',
+      '  contact.followup_days AS "Cadence (days)"',
       `FROM "${folder}"`,
       "WHERE is_template != true",
-      "SORT priority DESC, name ASC",
+      "SORT contact.priority DESC, name ASC",
       "```"
     ].join("\n");
     try {
@@ -688,8 +909,123 @@ ${todayHeading}
       }
       return await this.app.vault.create(dashPath, content);
     } catch (e) {
-      new import_obsidian.Notice(
+      new import_obsidian3.Notice(
         `Could not create dashboard at "${dashPath}". Check the path in plugin settings.`
+      );
+      return null;
+    }
+  }
+  // ── Bases dashboard (Workstream B) ───────────────────────────────────────
+  /** One reusable base with saved views, replacing the five near-duplicate
+   * Dataview tables. Nested contact.* keys are dot-accessible; date() forces
+   * date typing on the nested values. Kept in sync with Contacts.base. */
+  buildContactsBase() {
+    return `filters:
+  and:
+    - file.hasTag("contact")
+    - 'note.is_template != true'
+formulas:
+  last_contact_age: 'today() - date(contact.last_contacted)'
+  due_in: 'date(contact.next_followup) - today()'
+properties:
+  file.name:
+    displayName: Contact
+  contact.priority:
+    displayName: Priority
+  contact.relationship:
+    displayName: Type
+  contact.company:
+    displayName: Company
+  contact.last_contacted:
+    displayName: Last Contacted
+  contact.next_followup:
+    displayName: Next Follow-up
+  contact.followup_days:
+    displayName: Cadence (days)
+  formula.last_contact_age:
+    displayName: Last Contact Age
+  formula.due_in:
+    displayName: In
+views:
+  - type: table
+    name: Overdue
+    filters:
+      and:
+        - 'date(contact.next_followup) < today()'
+    order: [file.name, contact.priority, contact.last_contacted, contact.next_followup, formula.last_contact_age]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Due Today
+    filters:
+      and:
+        - 'date(contact.next_followup) == today()'
+    order: [file.name, contact.priority, contact.last_contacted]
+    sort:
+      - property: contact.priority
+        direction: DESC
+  - type: table
+    name: Next 7 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today()'
+        - 'date(contact.next_followup) <= today() + "7 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: Next 30 Days
+    filters:
+      and:
+        - 'date(contact.next_followup) > today() + "7 days"'
+        - 'date(contact.next_followup) <= today() + "30 days"'
+    order: [file.name, contact.priority, contact.next_followup, formula.due_in]
+    sort:
+      - property: contact.next_followup
+        direction: ASC
+  - type: table
+    name: All Contacts
+    order: [file.name, contact.company, contact.priority, contact.relationship, contact.last_contacted, contact.next_followup, contact.followup_days]
+    sort:
+      - property: contact.priority
+        direction: DESC
+      - property: file.name
+        direction: ASC
+`;
+  }
+  /** Create/refresh the base file, then a thin dashboard note that embeds it. */
+  async createDashboardBases(dashPath) {
+    const basePath = this.settings.basePath || DEFAULT_SETTINGS.basePath;
+    try {
+      const existingBase = this.app.vault.getAbstractFileByPath(basePath);
+      if (existingBase instanceof import_obsidian3.TFile) {
+        await this.app.vault.modify(existingBase, this.buildContactsBase());
+      } else {
+        const baseParent = basePath.split("/").slice(0, -1).join("/");
+        if (baseParent) await ensureFolder(this.app, baseParent);
+        await this.app.vault.create(basePath, this.buildContactsBase());
+      }
+      const baseName = basePath.replace(/\.base$/, "");
+      const content = [
+        "# \u{1F4C7} Contact Dashboard",
+        "",
+        "> [!tip] Powered by Simple Contact Manager and Obsidian Bases.",
+        "> Tap a view tab (Overdue \xB7 Due Today \xB7 Next 7 Days \xB7 Next 30 Days \xB7 All)",
+        "> to switch. Auto-updates as contacts change.",
+        "",
+        `![[${baseName}.base]]`,
+        ""
+      ].join("\n");
+      const parentFolder = dashPath.split("/").slice(0, -1).join("/");
+      if (parentFolder) await ensureFolder(this.app, parentFolder);
+      return await this.app.vault.create(dashPath, content);
+    } catch (e) {
+      new import_obsidian3.Notice(
+        `Could not create Bases dashboard. Check the dashboard and base paths in plugin settings.`
       );
       return null;
     }
@@ -699,12 +1035,10 @@ ${todayHeading}
     const folder = this.settings.contactsFolder;
     return this.app.vault.getMarkdownFiles().filter((f) => {
       var _a, _b;
-      if (!f.path.startsWith(folder + "/"))
-        return false;
+      if (!f.path.startsWith(folder + "/")) return false;
       const cache = this.app.metadataCache.getFileCache(f);
-      if (!cache)
-        return false;
-      const tags = (_a = (0, import_obsidian.getAllTags)(cache)) != null ? _a : [];
+      if (!cache) return false;
+      const tags = (_a = (0, import_obsidian3.getAllTags)(cache)) != null ? _a : [];
       return tags.includes("#contact") && ((_b = cache.frontmatter) == null ? void 0 : _b.is_template) !== true;
     });
   }
