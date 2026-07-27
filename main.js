@@ -31,7 +31,9 @@ var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   contactsFolder: "Contacts",
   dashboardPath: "Contact Dashboard.md",
-  dashboardEngine: "dataview",
+  // Bases is the default now that the mobile gate has passed; flip back to
+  // "dataview" any time via the Dashboard engine setting.
+  dashboardEngine: "bases",
   basePath: "Contacts.base"
 };
 var PRIORITIES = ["high", "medium", "low"];
